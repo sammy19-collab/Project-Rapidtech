@@ -1,8 +1,8 @@
 import logging
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from database import get_db
-from models import ReconciliationSession
+from models import AuditLog, ReconciliationSession
 from services.books_processor import process_books_file
 from services.gstr2b_processor import process_gstr2b_file
 
@@ -25,7 +25,7 @@ async def upload_books(
     recon_month: str = Form(...),   # "YYYY-MM" e.g. "2024-03"
     db: Session = Depends(get_db),
 ):
-    if not file.filename.endswith((".xlsx", ".xls")):
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files (.xlsx, .xls) are accepted.")
 
     recon_year = recon_month.split("-")[0] if "-" in recon_month else None
@@ -43,7 +43,8 @@ async def upload_books(
 
     try:
         file_bytes = await file.read()
-        books_count = process_books_file(file_bytes, session_obj.id, db)
+        books_count = process_books_file(file_bytes, session_obj.id, db,
+                                         reconciliation_month=recon_month)
     except ValueError as exc:
         session_obj.status = "error"
         db.commit()
@@ -55,8 +56,19 @@ async def upload_books(
         raise HTTPException(500, f"Failed to process file: {exc}")
 
     session_obj.status = "books_uploaded"
+    db.add(AuditLog(
+        session_id=session_obj.id,
+        action="books_uploaded",
+        details=f"file={file.filename} branch={branch} recon_month={recon_month} records={books_count}",
+    ))
     db.commit()
-    return {"session_id": session_obj.id, "books_count": books_count, "branch": branch, "recon_month": recon_month}
+    return {
+        "session_id": session_obj.id,
+        "books_count": books_count,
+        "branch": branch,
+        "recon_month": recon_month,
+        "filename": file.filename,
+    }
 
 
 @router.post("/upload/gstr2b/{session_id}")
@@ -65,15 +77,20 @@ async def upload_gstr2b(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    session_obj = db.query(ReconciliationSession).filter(ReconciliationSession.id == session_id).first()
+    session_obj = db.query(ReconciliationSession).filter(
+        ReconciliationSession.id == session_id
+    ).first()
     if not session_obj:
         raise HTTPException(404, f"Session {session_id} not found.")
-    if not file.filename.endswith((".xlsx", ".xls")):
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files (.xlsx, .xls) are accepted.")
 
     try:
         file_bytes = await file.read()
-        gstr2b_count = process_gstr2b_file(file_bytes, session_id, db)
+        gstr2b_count = process_gstr2b_file(
+            file_bytes, session_id, db,
+            reconciliation_month=session_obj.recon_month or "",
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     except Exception as exc:
@@ -82,8 +99,18 @@ async def upload_gstr2b(
 
     session_obj.gstr2b_filename = file.filename
     session_obj.status = "ready_to_reconcile"
+    db.add(AuditLog(
+        session_id=session_id,
+        action="gstr2b_uploaded",
+        details=f"file={file.filename} records={gstr2b_count}",
+    ))
     db.commit()
-    return {"session_id": session_id, "gstr2b_count": gstr2b_count, "status": session_obj.status}
+    return {
+        "session_id": session_id,
+        "gstr2b_count": gstr2b_count,
+        "status": session_obj.status,
+        "filename": file.filename,
+    }
 
 
 @router.get("/sessions")
@@ -93,8 +120,7 @@ def list_sessions(branch: str = None, recon_month: str = None, db: Session = Dep
         q = q.filter(ReconciliationSession.branch == branch.upper())
     if recon_month:
         q = q.filter(ReconciliationSession.recon_month == recon_month)
-    sessions = q.limit(50).all()
-    return [_session_dict(s) for s in sessions]
+    return [_session_dict(s) for s in q.limit(50).all()]
 
 
 @router.get("/sessions/{session_id}")
@@ -103,6 +129,16 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
     if not s:
         raise HTTPException(404, f"Session {session_id} not found.")
     return _session_dict(s)
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session(session_id: int, db: Session = Depends(get_db)):
+    s = db.query(ReconciliationSession).filter(ReconciliationSession.id == session_id).first()
+    if not s:
+        raise HTTPException(404, f"Session {session_id} not found.")
+    db.delete(s)
+    db.commit()
+    return {"deleted": session_id}
 
 
 def _session_dict(s: ReconciliationSession) -> dict:

@@ -1,115 +1,88 @@
 import io
 import logging
-from typing import Optional
+from decimal import Decimal
+from datetime import date
 
 import pandas as pd
 from sqlalchemy.orm import Session
 
 from models import BooksEntry
-from utils.cleaner import (
-    clean_gstin,
-    clean_invoice_number,
-    generate_validation_keys,
-    standardize_date,
-    safe_float,
-)
+from utils.cleaner import clean_gstin, clean_invoice_number, generate_validation_keys, standardize_date, safe_decimal
 
 logger = logging.getLogger(__name__)
 
-# All known aliases for each field (lowercase, stripped)
-_VENDOR_ALIASES = {
-    "vendor name", "vendor_name", "vender name", "vender_name",
-    "party name", "party_name", "supplier name", "supplier_name",
-    "name", "creditor name",
+# Exact RapidTech column names (lowercase for matching)
+_RAPIDTECH_COLUMNS = {
+    "vender name":          "vendor_name",
+    "vender gst no.":       "gstin",
+    "bill no":              "invoice_number",
+    "bill date":            "invoice_date",
+    "total base amt":       "taxable_value",
+    "cgst amount":          "cgst",
+    "sgst/utgst amount":    "sgst",
+    "igst amount":          "igst",
+    "expense head":         "expense_type",
+    "remark":               "narration",
 }
-_GSTIN_ALIASES = {
-    "gstin", "gst no", "gst_no", "gstin no", "gstin number",
-    "gstin of supplier", "gst number", "party gstin",
-    "vender gst no.", "vender gst no", "vendor gst no",
-    "vender gstin", "vendor gstin", "supplier gstin",
-}
-_INVOICE_NUM_ALIASES = {
-    "invoice number", "invoice_number", "invoice no", "invoice_no",
-    "bill no", "bill_no", "bill number", "bill_number",
-    "voucher no", "voucher number", "ref no", "reference number",
-    "doc refno", "doc ref no", "doc_refno",
-}
-_INVOICE_DATE_ALIASES = {
-    "invoice date", "invoice_date", "date", "bill date", "bill_date",
-    "voucher date", "transaction date", "inv date",
-}
-_TAXABLE_ALIASES = {
-    "taxable value", "taxable_value", "taxable amount", "taxable_amount",
-    "base amount", "base_amount", "assessable value", "taxable",
-    "total base amt", "total base amount", "base amt",
-}
-_CGST_ALIASES = {
-    "cgst", "cgst amount", "cgst_amount", "central tax", "cgst amt",
-}
-_SGST_ALIASES = {
-    "sgst", "sgst amount", "sgst_amount", "state tax", "state/ut tax",
-    "sgst/utgst amount", "sgst/utgst amt", "sgst amt",
-}
-_IGST_ALIASES = {
-    "igst", "igst amount", "igst_amount", "integrated tax", "igst amt",
-}
-_EXPENSE_TYPE_ALIASES = {
-    "expense type", "expense_type", "type", "category",
-    "expense head", "expense_head", "head", "ledger",
-}
-_NARRATION_ALIASES = {
-    "narration", "description", "remarks", "remark", "particulars",
-    "details", "note", "notes",
-}
+_REQUIRED = {"invoice_number", "invoice_date", "taxable_value", "gstin"}
 
-
-def _find_column(df_columns: list, aliases: set) -> Optional[str]:
-    for col in df_columns:
-        if str(col).strip().lower() in aliases:
-            return col
-    return None
+# Fallback aliases so the system still works if someone sends a slightly different file
+_FALLBACK_ALIASES = {
+    "vendor name": "vendor_name", "vendor_name": "vendor_name",
+    "vender_name": "vendor_name",
+    "gstin": "gstin", "gst no": "gstin", "vender gstin": "gstin",
+    "vendor gstin": "gstin", "vender gst no": "gstin",
+    "invoice number": "invoice_number", "invoice no": "invoice_number",
+    "bill number": "invoice_number", "bill_no": "invoice_number",
+    "invoice date": "invoice_date", "inv date": "invoice_date",
+    "date": "invoice_date",
+    "taxable value": "taxable_value", "taxable amount": "taxable_value",
+    "base amount": "taxable_value", "total base amount": "taxable_value",
+    "cgst": "cgst", "central tax": "cgst",
+    "sgst": "sgst", "state/ut tax": "sgst", "sgst/utgst amt": "sgst",
+    "igst": "igst", "integrated tax": "igst",
+    "expense type": "expense_type", "expense_type": "expense_type",
+    "narration": "narration", "remarks": "narration", "description": "narration",
+}
 
 
 def _detect_header_row(file_bytes: bytes, sheet_name: str) -> int:
-    """
-    Scan first 10 rows to find the one that looks like a header
-    (contains invoice/bill/gstin/vendor related keywords).
-    Returns the 0-based row index to use as header=N.
-    """
-    HEADER_KEYWORDS = {
-        "bill no", "invoice no", "invoice number", "gstin", "vendor name",
-        "vender name", "bill date", "invoice date", "taxable value",
-        "total base amt", "base amount",
-    }
-    df_raw = pd.read_excel(
-        io.BytesIO(file_bytes), sheet_name=sheet_name,
-        header=None, nrows=15, dtype=str, engine="openpyxl"
-    )
+    KEYWORDS = {"bill no", "vender name", "vendor name", "gstin", "total base amt",
+                "invoice number", "invoice no", "taxable value"}
+    df_raw = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name,
+                           header=None, nrows=15, dtype=str, engine="openpyxl")
     for i, row in df_raw.iterrows():
-        row_vals = {str(v).strip().lower() for v in row if pd.notna(v) and str(v).strip()}
-        if row_vals & HEADER_KEYWORDS:
+        vals = {str(v).strip().lower() for v in row if pd.notna(v) and str(v).strip()}
+        if vals & KEYWORDS:
             return i
-    return 0   # fallback: first row
+    return 0
 
 
-def process_books_file(file_bytes: bytes, session_id: int, db: Session) -> int:
+def _map_columns(df_columns: list) -> dict:
+    """Return {original_col: internal_field} mapping."""
+    mapping = {}
+    for col in df_columns:
+        key = str(col).strip().lower()
+        if key in _RAPIDTECH_COLUMNS:
+            mapping[col] = _RAPIDTECH_COLUMNS[key]
+        elif key in _FALLBACK_ALIASES:
+            mapping[col] = _FALLBACK_ALIASES[key]
+    return mapping
+
+
+def process_books_file(file_bytes: bytes, session_id: int, db: Session,
+                       reconciliation_month: str = "") -> int:
     try:
         xf = pd.ExcelFile(io.BytesIO(file_bytes), engine="openpyxl")
     except Exception as exc:
-        raise ValueError(f"Could not open Excel file: {exc}") from exc
+        raise ValueError(f"Could not open Excel file: {exc}")
 
-    # Pick sheet
     sheet_name = next((n for n in xf.sheet_names if n.strip().lower() == "books"), xf.sheet_names[0])
     logger.info("Books: using sheet '%s'", sheet_name)
 
-    # Auto-detect header row
     header_row = _detect_header_row(file_bytes, sheet_name)
-    logger.info("Books: header detected at row %d", header_row)
-
-    df = pd.read_excel(
-        io.BytesIO(file_bytes), sheet_name=sheet_name,
-        header=header_row, dtype=str, engine="openpyxl"
-    )
+    df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name,
+                       header=header_row, dtype=str, engine="openpyxl")
     df.fillna("", inplace=True)
     for col in df.select_dtypes(include="object").columns:
         df[col] = df[col].str.strip()
@@ -118,66 +91,60 @@ def process_books_file(file_bytes: bytes, session_id: int, db: Session) -> int:
     df.drop_duplicates(inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    cols = list(df.columns)
-    vendor_col   = _find_column(cols, _VENDOR_ALIASES)
-    gstin_col    = _find_column(cols, _GSTIN_ALIASES)
-    inv_num_col  = _find_column(cols, _INVOICE_NUM_ALIASES)
-    inv_date_col = _find_column(cols, _INVOICE_DATE_ALIASES)
-    taxable_col  = _find_column(cols, _TAXABLE_ALIASES)
-    cgst_col     = _find_column(cols, _CGST_ALIASES)
-    sgst_col     = _find_column(cols, _SGST_ALIASES)
-    igst_col     = _find_column(cols, _IGST_ALIASES)
-    expense_col  = _find_column(cols, _EXPENSE_TYPE_ALIASES)
-    narration_col = _find_column(cols, _NARRATION_ALIASES)
+    col_map = _map_columns(list(df.columns))
+    # Reverse: internal_field -> original_col
+    field_col = {v: k for k, v in col_map.items()}
 
-    logger.info(
-        "Books column map — vendor:%s gstin:%s inv_num:%s inv_date:%s taxable:%s",
-        vendor_col, gstin_col, inv_num_col, inv_date_col, taxable_col,
-    )
+    missing = _REQUIRED - set(field_col.keys())
+    if missing:
+        raise ValueError(f"RapidTech format invalid: missing columns: {sorted(missing)}")
+
+    logger.info("Books column mapping: %s", field_col)
 
     entries = []
     for _, row in df.iterrows():
-        raw_gstin    = row[gstin_col] if gstin_col else None
-        raw_inv_num  = row[inv_num_col] if inv_num_col else None
-        raw_inv_date = row[inv_date_col] if inv_date_col else None
-        raw_taxable  = row[taxable_col] if taxable_col else "0"
+        raw_gstin    = row.get(field_col.get("gstin"))
+        raw_inv_num  = row.get(field_col.get("invoice_number"))
+        raw_inv_date = row.get(field_col.get("invoice_date"))
+        raw_taxable  = row.get(field_col.get("taxable_value"), "0")
 
-        # Skip rows that look like subtotals/blanks
         if not raw_inv_num and not raw_gstin:
             continue
 
         gstin          = clean_gstin(raw_gstin)
         invoice_number = clean_invoice_number(raw_inv_num)
-        _, date_str    = standardize_date(raw_inv_date)
-        invoice_date   = date_str or (str(raw_inv_date) if raw_inv_date else "")
+        inv_month, inv_date_obj = standardize_date(raw_inv_date)
 
-        taxable_value = safe_float(raw_taxable)
-        cgst  = safe_float(row[cgst_col])  if cgst_col  else 0.0
-        sgst  = safe_float(row[sgst_col])  if sgst_col  else 0.0
-        igst  = safe_float(row[igst_col])  if igst_col  else 0.0
-        total_gst = round(cgst + sgst + igst, 2)
+        taxable = safe_decimal(raw_taxable)
+        cgst    = safe_decimal(row.get(field_col.get("cgst"), "0"))
+        sgst    = safe_decimal(row.get(field_col.get("sgst"), "0"))
+        igst    = safe_decimal(row.get(field_col.get("igst"), "0"))
+        total_gst = cgst + sgst + igst
 
-        keys = generate_validation_keys(gstin, invoice_number, raw_inv_date, taxable_value)
+        keys = generate_validation_keys(gstin, invoice_number, raw_inv_date,
+                                        taxable, reconciliation_month)
 
-        # Vendor name: strip embedded GSTIN if present (e.g. "NAME-GSTIN")
-        vendor_raw = str(row[vendor_col]) if vendor_col and row[vendor_col] else None
+        vendor_raw = row.get(field_col.get("vendor_name"))
+        vendor_raw = str(vendor_raw) if vendor_raw else None
         if vendor_raw and "-" in vendor_raw:
             parts = vendor_raw.rsplit("-", 1)
-            if len(parts[1]) == 15:   # looks like a GSTIN
-                vendor_raw = parts[0].strip()
+            if len(parts) == 2 and len(parts[1].strip()) == 15:
                 if not gstin:
-                    gstin = clean_gstin(parts[1])
+                    gstin = clean_gstin(parts[1].strip())
+                vendor_raw = parts[0].strip()
 
         entries.append(BooksEntry(
             session_id=session_id,
             vendor_name=vendor_raw,
             gstin=gstin or None,
             invoice_number=invoice_number or None,
-            invoice_date=invoice_date or None,
-            taxable_value=taxable_value,
+            invoice_date=inv_date_obj,
+            invoice_month=inv_month or None,
+            reconciliation_month=reconciliation_month or None,
+            taxable_value=taxable,
             cgst=cgst, sgst=sgst, igst=igst, total_gst=total_gst,
-            expense_type=str(row[expense_col]) if expense_col and row[expense_col] else None,
-            narration=str(row[narration_col]) if narration_col and row[narration_col] else None,
+            expense_type=str(row.get(field_col.get("expense_type")) or "") or None,
+            narration=str(row.get(field_col.get("narration")) or "") or None,
             val1=keys["val1"], val2=keys["val2"], val3=keys["val3"],
             val4=keys["val4"], val5=keys["val5"],
         ))
