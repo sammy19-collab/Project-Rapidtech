@@ -7,6 +7,8 @@ import { getBranches, uploadBooks, uploadGSTR2B, runReconciliation } from '../ap
 
 const STEPS = ['Select Branch & Month', 'Upload Books', 'Upload GSTR-2B', 'Reconcile']
 
+const DEFAULT_BRANCHES = ['AP', 'BLR', 'BBSR', 'HYD', 'MUM', 'DEL', 'CHN', 'KOL', 'PUN', 'Other']
+
 // Generate last 24 months as "YYYY-MM"
 function getMonthOptions() {
   const opts = []
@@ -23,7 +25,7 @@ function getMonthOptions() {
 export default function Home() {
   const navigate = useNavigate()
   const [step, setStep] = useState(0)
-  const [branches, setBranches] = useState([])
+  const [branches, setBranches] = useState(DEFAULT_BRANCHES)
   const [branch, setBranch] = useState('')
   const [reconMonth, setReconMonth] = useState(getMonthOptions()[1].val)
   const [sessionId, setSessionId] = useState(null)
@@ -37,7 +39,7 @@ export default function Home() {
   const monthOptions = getMonthOptions()
 
   useEffect(() => {
-    getBranches().then(r => setBranches(r.data.branches)).catch(() => {})
+    getBranches().then(r => setBranches(r.data.branches)).catch(() => setBranches(DEFAULT_BRANCHES))
   }, [])
 
   const handleConfirmBranch = () => {
