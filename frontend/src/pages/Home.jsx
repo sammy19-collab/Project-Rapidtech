@@ -165,7 +165,7 @@ export default function Home() {
           <UploadZone
             onUpload={handleBooksUpload}
             label={booksStatus === 'success' ? `✓ ${booksInfo?.filename}` : 'Drop RapidTech Books Excel here'}
-            description="Sheet must be named 'Books'"
+            description="Upload RapidTech Books Excel file (.xlsx / .xls)"
             status={booksStatus}
             disabled={step !== 1}
           />
@@ -180,7 +180,7 @@ export default function Home() {
           <UploadZone
             onUpload={handleGstrUpload}
             label={gstrStatus === 'success' ? `✓ ${gstrInfo?.filename}` : `Drop ${branch} GSTR-2B Excel here`}
-            description="Sheet must be named '2B' — downloaded from GST portal"
+            description="Upload GSTR-2B Excel downloaded from GST portal (.xlsx / .xls)"
             status={gstrStatus}
             disabled={step !== 2 || gstrStatus === 'success'}
           />

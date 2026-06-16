@@ -79,9 +79,8 @@ def process_books_file(file_bytes: bytes, session_id: int, db: Session) -> int:
             sheet_name = name
             break
     if sheet_name is None:
-        raise ValueError(
-            f"Sheet 'Books' not found. Available sheets: {xf.sheet_names}"
-        )
+        sheet_name = xf.sheet_names[0]   # fall back to first sheet
+        logger.info("Sheet 'Books' not found; using first sheet '%s'", sheet_name)
 
     df = xf.parse(sheet_name, dtype=str)
     df.fillna("", inplace=True)
