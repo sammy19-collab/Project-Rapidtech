@@ -52,7 +52,17 @@ app.include_router(dashboard.router)
 
 @app.on_event("startup")
 async def startup_event():
-    """Create all database tables on application startup."""
+    """Create all database tables on application startup, retrying until DB is ready."""
+    import time
+    from sqlalchemy import text
+    for attempt in range(1, 11):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            break
+        except Exception as exc:
+            logger.warning("DB not ready (attempt %d/10): %s", attempt, exc)
+            time.sleep(3)
     logger.info("Creating database tables if they do not exist...")
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables ready.")
