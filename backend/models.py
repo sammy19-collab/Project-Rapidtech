@@ -28,6 +28,9 @@ class ReconciliationSession(Base):
     status = Column(String(50), nullable=False, default="processing")
     books_filename = Column(String(255), nullable=True)
     gstr2b_filename = Column(String(255), nullable=True)
+    branch = Column(String(50), nullable=True)
+    recon_month = Column(String(7), nullable=True)   # e.g. "2024-03"
+    recon_year = Column(String(4), nullable=True)    # e.g. "2024"
 
     books_entries = relationship(
         "BooksEntry", back_populates="session", cascade="all, delete-orphan"
@@ -129,6 +132,7 @@ class ReconciliationResult(Base):
     invoice_date = Column(String(50), nullable=True)
     taxable_value = Column(Float, nullable=True, default=0.0)
     total_gst = Column(Float, nullable=True, default=0.0)
+    month_year = Column(String(7), nullable=True, index=True)   # "MM-YYYY" for grouping
 
     session = relationship("ReconciliationSession", back_populates="results")
     books_entry = relationship("BooksEntry", foreign_keys=[books_entry_id])

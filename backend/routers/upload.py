@@ -1,13 +1,6 @@
-"""
-Upload router: handles Books and GSTR-2B file uploads and session management.
-"""
-
 import logging
-from typing import List
-
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
-
 from database import get_db
 from models import ReconciliationSession
 from services.books_processor import process_books_file
@@ -17,57 +10,53 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Upload"])
 
+KNOWN_BRANCHES = ["AP", "BLR", "BBSR", "HYD", "MUM", "DEL", "CHN", "KOL", "PUN", "Other"]
+
+
+@router.get("/branches")
+def list_branches():
+    return {"branches": KNOWN_BRANCHES}
+
 
 @router.post("/upload/books")
 async def upload_books(
     file: UploadFile = File(...),
+    branch: str = Form(...),
+    recon_month: str = Form(...),   # "YYYY-MM" e.g. "2024-03"
     db: Session = Depends(get_db),
 ):
-    """
-    Upload the company purchase books Excel file (.xlsx).
-
-    Creates a new ReconciliationSession and processes the 'Books' sheet.
-    Returns the new session ID and number of records loaded.
-    """
     if not file.filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only Excel files (.xlsx, .xls) are accepted.",
-        )
+        raise HTTPException(400, "Only Excel files (.xlsx, .xls) are accepted.")
+
+    recon_year = recon_month.split("-")[0] if "-" in recon_month else None
 
     session_obj = ReconciliationSession(
         status="processing",
         books_filename=file.filename,
+        branch=branch.upper().strip(),
+        recon_month=recon_month,
+        recon_year=recon_year,
     )
     db.add(session_obj)
     db.commit()
     db.refresh(session_obj)
-    session_id = session_obj.id
 
     try:
         file_bytes = await file.read()
-        books_count = process_books_file(file_bytes, session_id, db)
+        books_count = process_books_file(file_bytes, session_obj.id, db)
     except ValueError as exc:
         session_obj.status = "error"
         db.commit()
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        raise HTTPException(422, str(exc))
     except Exception as exc:
-        logger.exception("Unexpected error processing Books file for session %d", session_id)
+        logger.exception("Error processing Books for session %d", session_obj.id)
         session_obj.status = "error"
         db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process file: {exc}",
-        )
+        raise HTTPException(500, f"Failed to process file: {exc}")
 
     session_obj.status = "books_uploaded"
     db.commit()
-
-    return {
-        "session_id": session_id,
-        "books_count": books_count,
-        "status": session_obj.status,
-    }
+    return {"session_id": session_obj.id, "books_count": books_count, "branch": branch, "recon_month": recon_month}
 
 
 @router.post("/upload/gstr2b/{session_id}")
@@ -76,84 +65,54 @@ async def upload_gstr2b(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    """
-    Upload the GSTR-2B Excel export for an existing session.
-
-    Processes the '2B' sheet and marks the session as ready to reconcile.
-    """
-    session_obj = db.query(ReconciliationSession).filter(
-        ReconciliationSession.id == session_id
-    ).first()
+    session_obj = db.query(ReconciliationSession).filter(ReconciliationSession.id == session_id).first()
     if not session_obj:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Session {session_id} not found.",
-        )
-
+        raise HTTPException(404, f"Session {session_id} not found.")
     if not file.filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only Excel files (.xlsx, .xls) are accepted.",
-        )
+        raise HTTPException(400, "Only Excel files (.xlsx, .xls) are accepted.")
 
     try:
         file_bytes = await file.read()
         gstr2b_count = process_gstr2b_file(file_bytes, session_id, db)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        raise HTTPException(422, str(exc))
     except Exception as exc:
-        logger.exception("Unexpected error processing GSTR-2B file for session %d", session_id)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process file: {exc}",
-        )
+        logger.exception("Error processing GSTR-2B for session %d", session_id)
+        raise HTTPException(500, f"Failed to process file: {exc}")
 
     session_obj.gstr2b_filename = file.filename
     session_obj.status = "ready_to_reconcile"
     db.commit()
-
-    return {
-        "session_id": session_id,
-        "gstr2b_count": gstr2b_count,
-        "status": session_obj.status,
-    }
+    return {"session_id": session_id, "gstr2b_count": gstr2b_count, "status": session_obj.status}
 
 
 @router.get("/sessions")
-async def list_sessions(db: Session = Depends(get_db)):
-    """Return a list of all reconciliation sessions, newest first."""
-    sessions = (
-        db.query(ReconciliationSession)
-        .order_by(ReconciliationSession.created_at.desc())
-        .all()
-    )
-    return [
-        {
-            "id": s.id,
-            "created_at": s.created_at.isoformat() if s.created_at else None,
-            "status": s.status,
-            "books_filename": s.books_filename,
-            "gstr2b_filename": s.gstr2b_filename,
-        }
-        for s in sessions
-    ]
+def list_sessions(branch: str = None, recon_month: str = None, db: Session = Depends(get_db)):
+    q = db.query(ReconciliationSession).order_by(ReconciliationSession.created_at.desc())
+    if branch:
+        q = q.filter(ReconciliationSession.branch == branch.upper())
+    if recon_month:
+        q = q.filter(ReconciliationSession.recon_month == recon_month)
+    sessions = q.limit(50).all()
+    return [_session_dict(s) for s in sessions]
 
 
 @router.get("/sessions/{session_id}")
-async def get_session(session_id: int, db: Session = Depends(get_db)):
-    """Return details for a specific reconciliation session."""
-    session_obj = db.query(ReconciliationSession).filter(
-        ReconciliationSession.id == session_id
-    ).first()
-    if not session_obj:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Session {session_id} not found.",
-        )
+def get_session(session_id: int, db: Session = Depends(get_db)):
+    s = db.query(ReconciliationSession).filter(ReconciliationSession.id == session_id).first()
+    if not s:
+        raise HTTPException(404, f"Session {session_id} not found.")
+    return _session_dict(s)
+
+
+def _session_dict(s: ReconciliationSession) -> dict:
     return {
-        "id": session_obj.id,
-        "created_at": session_obj.created_at.isoformat() if session_obj.created_at else None,
-        "status": session_obj.status,
-        "books_filename": session_obj.books_filename,
-        "gstr2b_filename": session_obj.gstr2b_filename,
+        "id": s.id,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+        "status": s.status,
+        "books_filename": s.books_filename,
+        "gstr2b_filename": s.gstr2b_filename,
+        "branch": s.branch,
+        "recon_month": s.recon_month,
+        "recon_year": s.recon_year,
     }

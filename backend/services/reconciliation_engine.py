@@ -43,6 +43,16 @@ def _category_for_score(score: int) -> str:
     return _CAT_MANUAL
 
 
+def _extract_month_year(date_str: str | None) -> str | None:
+    """Convert 'DD-MM-YYYY' → 'MM-YYYY' for grouping."""
+    if not date_str:
+        return None
+    parts = str(date_str).split("-")
+    if len(parts) == 3 and len(parts[2]) == 4:
+        return f"{parts[1]}-{parts[2]}"
+    return None
+
+
 def _mismatch_reason(score: int, b: BooksEntry, g: Optional[GSTR2BEntry]) -> Optional[str]:
     """Generate a human-readable mismatch reason for non-exact matches."""
     if score == 5:
@@ -130,6 +140,7 @@ def run_reconciliation(session_id: int, db: Session) -> dict:
             invoice_date=b.invoice_date,
             taxable_value=b.taxable_value,
             total_gst=b.total_gst,
+            month_year=_extract_month_year(b.invoice_date),
         )
         results.append(result)
 
@@ -160,6 +171,7 @@ def run_reconciliation(session_id: int, db: Session) -> dict:
                 invoice_date=g.invoice_date,
                 taxable_value=g.taxable_value,
                 total_gst=total_gst,
+                month_year=_extract_month_year(g.invoice_date),
             )
             results.append(result)
             summary["missing_in_books"] += 1

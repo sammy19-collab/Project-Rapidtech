@@ -2,9 +2,13 @@ import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api' })
 
-export const uploadBooks = (file) => {
+export const getBranches = () => api.get('/branches')
+
+export const uploadBooks = (file, branch, reconMonth) => {
   const fd = new FormData()
   fd.append('file', file)
+  fd.append('branch', branch)
+  fd.append('recon_month', reconMonth)
   return api.post('/upload/books', fd)
 }
 
@@ -16,15 +20,16 @@ export const uploadGSTR2B = (sessionId, file) => {
 
 export const runReconciliation = (sessionId) => api.post(`/reconcile/${sessionId}`)
 
-export const getResults = (sessionId) => api.get(`/results/${sessionId}`)
-export const getReconciled = (sessionId) => api.get(`/results/${sessionId}/reconciled`)
-export const getProbable = (sessionId) => api.get(`/results/${sessionId}/probable`)
-export const getMissingInBooks = (sessionId) => api.get(`/results/${sessionId}/missing-in-books`)
-export const getMissingInGSTR2B = (sessionId) => api.get(`/results/${sessionId}/missing-in-gstr2b`)
+export const getAvailableMonths = (sessionId) => api.get(`/results/${sessionId}/months`)
+export const getResults = (sessionId, monthYear) => api.get(`/results/${sessionId}`, { params: monthYear ? { month_year: monthYear } : {} })
+export const getReconciled = (sessionId, monthYear) => api.get(`/results/${sessionId}/reconciled`, { params: monthYear ? { month_year: monthYear } : {} })
+export const getProbable = (sessionId, monthYear) => api.get(`/results/${sessionId}/probable`, { params: monthYear ? { month_year: monthYear } : {} })
+export const getMissingInBooks = (sessionId, monthYear) => api.get(`/results/${sessionId}/missing-in-books`, { params: monthYear ? { month_year: monthYear } : {} })
+export const getMissingInGSTR2B = (sessionId, monthYear) => api.get(`/results/${sessionId}/missing-in-gstr2b`, { params: monthYear ? { month_year: monthYear } : {} })
 
-export const getDashboard = (sessionId) => api.get(`/dashboard/${sessionId}`)
+export const getDashboard = (sessionId, monthYear) => api.get(`/dashboard/${sessionId}`, { params: monthYear ? { month_year: monthYear } : {} })
 
 export const getTallyPreview = (sessionId) => api.get(`/tally/${sessionId}/preview`)
 export const downloadTallyXml = (sessionId) => api.get(`/tally/${sessionId}/xml`, { responseType: 'blob' })
 
-export const getSessions = () => api.get('/sessions')
+export const getSessions = (branch, reconMonth) => api.get('/sessions', { params: { ...(branch ? { branch } : {}), ...(reconMonth ? { recon_month: reconMonth } : {}) } })

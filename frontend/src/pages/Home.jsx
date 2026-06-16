@@ -1,15 +1,31 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import StepIndicator from '../components/StepIndicator'
 import UploadZone from '../components/UploadZone'
-import { uploadBooks, uploadGSTR2B, runReconciliation } from '../api'
+import { getBranches, uploadBooks, uploadGSTR2B, runReconciliation } from '../api'
 
-const STEPS = ['Upload Books', 'Upload GSTR-2B', 'Reconcile']
+const STEPS = ['Select Branch & Month', 'Upload Books', 'Upload GSTR-2B', 'Reconcile']
+
+// Generate last 24 months as "YYYY-MM"
+function getMonthOptions() {
+  const opts = []
+  const now = new Date()
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const label = d.toLocaleString('en-IN', { month: 'long', year: 'numeric' })
+    opts.push({ val, label })
+  }
+  return opts
+}
 
 export default function Home() {
   const navigate = useNavigate()
   const [step, setStep] = useState(0)
+  const [branches, setBranches] = useState([])
+  const [branch, setBranch] = useState('')
+  const [reconMonth, setReconMonth] = useState(getMonthOptions()[1].val)
   const [sessionId, setSessionId] = useState(null)
   const [booksStatus, setBooksStatus] = useState('idle')
   const [gstrStatus, setGstrStatus] = useState('idle')
@@ -18,14 +34,25 @@ export default function Home() {
   const [reconciling, setReconciling] = useState(false)
   const [summary, setSummary] = useState(null)
 
+  const monthOptions = getMonthOptions()
+
+  useEffect(() => {
+    getBranches().then(r => setBranches(r.data.branches)).catch(() => {})
+  }, [])
+
+  const handleConfirmBranch = () => {
+    if (!branch) { toast.error('Please select a branch'); return }
+    setStep(1)
+  }
+
   const handleBooksUpload = async (file) => {
     setBooksStatus('loading')
     try {
-      const res = await uploadBooks(file)
+      const res = await uploadBooks(file, branch, reconMonth)
       setSessionId(res.data.session_id)
       setBooksInfo(res.data)
       setBooksStatus('success')
-      setStep(1)
+      setStep(2)
       toast.success(`Books loaded: ${res.data.books_count} records`)
     } catch (e) {
       setBooksStatus('error')
@@ -48,14 +75,14 @@ export default function Home() {
 
   const handleReconcile = async () => {
     setReconciling(true)
-    setStep(2)
+    setStep(3)
     try {
       const res = await runReconciliation(sessionId)
       setSummary(res.data.summary)
       toast.success('Reconciliation complete!')
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Reconciliation failed')
-      setStep(1)
+      setStep(2)
     } finally {
       setReconciling(false)
     }
@@ -65,16 +92,72 @@ export default function Home() {
     <div className="max-w-2xl mx-auto">
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-slate-100">GST Reconciliation</h1>
-        <p className="text-slate-400 text-sm mt-1">Upload Books & GSTR-2B to run automated reconciliation</p>
+        <p className="text-slate-400 text-sm mt-1">Select branch and period, then upload Books & GSTR-2B files</p>
       </div>
 
       <StepIndicator steps={STEPS} current={step} />
 
-      <div className="space-y-6">
-        {/* Step 1: Books */}
-        <div className={`bg-slate-800 border border-slate-700 rounded-lg p-6 ${step !== 0 && booksStatus !== 'success' ? 'opacity-50' : ''}`}>
+      <div className="space-y-4">
+
+        {/* Step 0: Branch & Month */}
+        <div className={`bg-slate-800 border rounded-lg p-6 ${step > 0 ? 'border-green-800' : 'border-slate-700'}`}>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-slate-200">Step 1: Upload Books Excel</h2>
+            <h2 className="font-semibold text-slate-200">Step 1: Select Branch & Period</h2>
+            {step > 0 && (
+              <span className="text-green-400 text-sm font-mono">
+                {branch} — {monthOptions.find(m => m.val === reconMonth)?.label}
+              </span>
+            )}
+          </div>
+          {step === 0 ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-400 uppercase tracking-wider block mb-2">Branch</label>
+                  <select
+                    value={branch}
+                    onChange={e => setBranch(e.target.value)}
+                    className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">— Select Branch —</option>
+                    {branches.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 uppercase tracking-wider block mb-2">Reconciliation Month</label>
+                  <select
+                    value={reconMonth}
+                    onChange={e => setReconMonth(e.target.value)}
+                    className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-blue-500"
+                  >
+                    {monthOptions.map(m => <option key={m.val} value={m.val}>{m.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              <button
+                onClick={handleConfirmBranch}
+                disabled={!branch}
+                className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded transition-colors"
+              >
+                Continue
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 text-sm">
+              <span className="bg-blue-900 text-blue-300 px-3 py-1 rounded font-mono font-bold">{branch}</span>
+              <span className="text-slate-400">{monthOptions.find(m => m.val === reconMonth)?.label}</span>
+              <button onClick={() => { setStep(0); setBooksStatus('idle'); setGstrStatus('idle'); setSessionId(null); setBooksInfo(null); setGstrInfo(null); setSummary(null) }}
+                className="ml-auto text-xs text-slate-500 hover:text-slate-300 underline">
+                Change
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Step 1: Books */}
+        <div className={`bg-slate-800 border border-slate-700 rounded-lg p-6 transition-opacity ${step < 1 ? 'opacity-40 pointer-events-none' : ''}`}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-semibold text-slate-200">Step 2: Upload Books Excel</h2>
             {booksInfo && <span className="text-green-400 text-sm font-mono">{booksInfo.books_count} records</span>}
           </div>
           <UploadZone
@@ -82,49 +165,49 @@ export default function Home() {
             label={booksStatus === 'success' ? `✓ ${booksInfo?.filename}` : 'Drop RapidTech Books Excel here'}
             description="Sheet must be named 'Books'"
             status={booksStatus}
-            disabled={step !== 0}
+            disabled={step !== 1}
           />
         </div>
 
         {/* Step 2: GSTR-2B */}
-        <div className={`bg-slate-800 border border-slate-700 rounded-lg p-6 ${step < 1 ? 'opacity-40 pointer-events-none' : ''}`}>
+        <div className={`bg-slate-800 border border-slate-700 rounded-lg p-6 transition-opacity ${step < 2 ? 'opacity-40 pointer-events-none' : ''}`}>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-slate-200">Step 2: Upload GSTR-2B Excel</h2>
+            <h2 className="font-semibold text-slate-200">Step 3: Upload GSTR-2B Excel</h2>
             {gstrInfo && <span className="text-green-400 text-sm font-mono">{gstrInfo.gstr2b_count} records</span>}
           </div>
           <UploadZone
             onUpload={handleGstrUpload}
-            label={gstrStatus === 'success' ? `✓ ${gstrInfo?.filename}` : 'Drop GSTR-2B Excel here'}
-            description="Sheet must be named '2B' (downloaded from GST portal)"
+            label={gstrStatus === 'success' ? `✓ ${gstrInfo?.filename}` : `Drop ${branch} GSTR-2B Excel here`}
+            description="Sheet must be named '2B' — downloaded from GST portal"
             status={gstrStatus}
-            disabled={step < 1 || gstrStatus === 'success'}
+            disabled={step !== 2 || gstrStatus === 'success'}
           />
           {gstrStatus === 'success' && (
-            <button
-              onClick={handleReconcile}
-              className="mt-4 w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded transition-colors"
-            >
-              Run Reconciliation
+            <button onClick={handleReconcile}
+              className="mt-4 w-full bg-green-700 hover:bg-green-600 text-white font-semibold py-2.5 rounded transition-colors">
+              Run Reconciliation for {branch} — {monthOptions.find(m => m.val === reconMonth)?.label}
             </button>
           )}
         </div>
 
         {/* Step 3: Result */}
-        {step === 2 && (
+        {step === 3 && (
           <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
-            <h2 className="font-semibold text-slate-200 mb-4">Step 3: Reconciliation</h2>
+            <h2 className="font-semibold text-slate-200 mb-4">Step 4: Reconciliation Results</h2>
             {reconciling ? (
               <div className="flex flex-col items-center gap-3 py-6">
                 <div className="w-10 h-10 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                <span className="text-slate-400">Comparing {booksInfo?.books_count} books entries against {gstrInfo?.gstr2b_count} GSTR-2B entries...</span>
+                <span className="text-slate-400 text-sm">
+                  Comparing {booksInfo?.books_count} books entries against {gstrInfo?.gstr2b_count} GSTR-2B entries...
+                </span>
               </div>
             ) : summary ? (
               <div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
                   {[
                     { label: 'Total Books', value: summary.total_books, color: 'text-slate-300' },
-                    { label: 'Reconciled', value: summary.reconciled, color: 'text-green-400' },
-                    { label: 'Probable Matches', value: summary.probable, color: 'text-amber-400' },
+                    { label: 'Reconciled', value: summary.exact_match + (summary.strong_match || 0), color: 'text-green-400' },
+                    { label: 'Probable', value: summary.probable_match, color: 'text-amber-400' },
                     { label: 'Manual Review', value: summary.manual_review, color: 'text-red-400' },
                     { label: 'Missing in Books', value: summary.missing_in_books, color: 'text-purple-400' },
                     { label: 'GSTR-2B Total', value: summary.total_gstr2b, color: 'text-slate-300' },
@@ -136,11 +219,17 @@ export default function Home() {
                   ))}
                 </div>
                 <div className="flex gap-3">
-                  <button onClick={() => navigate(`/dashboard/${sessionId}`)} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 rounded transition-colors text-sm">
+                  <button onClick={() => navigate(`/dashboard/${sessionId}`)}
+                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 rounded transition-colors text-sm">
                     View Dashboard
                   </button>
-                  <button onClick={() => navigate(`/results/${sessionId}`)} className="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-semibold py-2 rounded transition-colors text-sm">
+                  <button onClick={() => navigate(`/results/${sessionId}`)}
+                    className="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-semibold py-2 rounded transition-colors text-sm">
                     View Results
+                  </button>
+                  <button onClick={() => navigate(`/tally/${sessionId}`)}
+                    className="flex-1 bg-slate-600 hover:bg-slate-500 text-white font-semibold py-2 rounded transition-colors text-sm">
+                    Tally Export
                   </button>
                 </div>
               </div>
