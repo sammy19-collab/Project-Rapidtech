@@ -113,7 +113,7 @@ def detect_recon_month_from_filename(filename: str) -> str:
         mm = parts[0][:2]
         yyyy = parts[0][2:]
         if 1 <= int(mm) <= 12 and 2000 <= int(yyyy) <= 2100:
-            return f"{yyyy}-{mm}"
+            return f"{mm}-{yyyy}"
     return ""
 
 
@@ -144,7 +144,7 @@ def _detect_recon_month_from_metadata(file_bytes: bytes) -> str:
             if month_num and fy_start:
                 # April-Dec belong to the starting FY year; Jan-Mar to the next
                 year = int(fy_start) if int(month_num) >= 4 else int(fy_start) + 1
-                return f"{year}-{month_num}"
+                return f"{month_num}-{year}"
     except Exception:
         pass
     return ""
