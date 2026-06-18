@@ -186,7 +186,7 @@ def run_reconciliation(session_id: int, db: Session) -> dict:
             total_gst=b.total_gst,
             invoice_month=b.invoice_month,
             reconciliation_month=b.reconciliation_month,
-            month_year=b.invoice_month,
+            month_year=best_g.reconciliation_month if best_g else b.invoice_month,
             branch=best_g.branch if best_g else None,
         ))
 
@@ -213,7 +213,7 @@ def run_reconciliation(session_id: int, db: Session) -> dict:
                 total_gst=g.total_gst,
                 invoice_month=g.invoice_month,
                 reconciliation_month=g.reconciliation_month,
-                month_year=g.invoice_month,
+                month_year=g.reconciliation_month,
                 branch=g.branch,
             ))
             summary["missing_in_books"] += 1
