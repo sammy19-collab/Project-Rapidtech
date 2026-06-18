@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import get_db
@@ -22,7 +22,6 @@ def list_branches():
 @router.post("/upload/books")
 async def upload_books(
     file: UploadFile = File(...),
-    branch: str = Form(None),   # optional — user-selected branch overrides filename detection
     db: Session = Depends(get_db),
 ):
     if not file.filename.lower().endswith((".xlsx", ".xls")):
@@ -48,14 +47,12 @@ async def upload_books(
         db.commit()
         raise HTTPException(500, f"Failed to process file: {exc}")
 
-    # User-selected branch takes priority over filename detection
-    branch = branch.upper().strip() if branch else detected_branch
-    session_obj.branch = branch
+    session_obj.branch = detected_branch
     session_obj.status = "books_uploaded"
     db.add(AuditLog(
         session_id=session_obj.id,
         action="books_uploaded",
-        details=f"file={file.filename} branch={branch} detected={detected_branch} records={books_count}",
+        details=f"file={file.filename} branch={detected_branch} records={books_count}",
     ))
     db.commit()
     return {
@@ -82,7 +79,7 @@ async def upload_gstr2b(
 
     try:
         file_bytes = await file.read()
-        gstr2b_count, detected_month = process_gstr2b_file(
+        gstr2b_count, detected_month, detected_branch = process_gstr2b_file(
             file_bytes, session_id, db,
             filename=file.filename,
         )
@@ -94,23 +91,26 @@ async def upload_gstr2b(
 
     db.add(GSTR2BUpload(session_id=session_id, filename=file.filename, record_count=gstr2b_count))
 
-    # Update session period from detected GSTR-2B month if not already set
+    # Update session period and branch from first GSTR-2B file
     if detected_month and not session_obj.recon_month:
         session_obj.recon_month = detected_month
         session_obj.recon_year = detected_month.split("-")[0]
+    if detected_branch and detected_branch != "Other" and not session_obj.branch:
+        session_obj.branch = detected_branch
 
     session_obj.gstr2b_filename = file.filename
     session_obj.status = "ready_to_reconcile"
     db.add(AuditLog(
         session_id=session_id,
         action="gstr2b_uploaded",
-        details=f"file={file.filename} detected_month={detected_month} records={gstr2b_count}",
+        details=f"file={file.filename} branch={detected_branch} month={detected_month} records={gstr2b_count}",
     ))
     db.commit()
     return {
         "session_id": session_id,
         "gstr2b_count": gstr2b_count,
         "detected_month": detected_month,
+        "detected_branch": detected_branch,
         "status": session_obj.status,
         "filename": file.filename,
     }

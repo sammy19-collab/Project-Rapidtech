@@ -45,7 +45,23 @@ from utils.cleaner import (
     safe_decimal,
 )
 
-logger = logging.getLogger(__name__)
+_STATE_TO_BRANCH = {
+    "03": "PUN",  # Punjab
+    "07": "DEL",  # Delhi
+    "19": "KOL",  # West Bengal
+    "21": "BBSR", # Odisha
+    "27": "MUM",  # Maharashtra
+    "29": "BLR",  # Karnataka
+    "33": "CHN",  # Tamil Nadu
+    "36": "HYD",  # Telangana
+    "37": "AP",   # Andhra Pradesh
+}
+
+def detect_branch_from_gstin(gstin: str) -> str:
+    """Map 2-digit state code (first 2 chars of GSTIN) to RapidTech branch."""
+    if gstin and len(gstin) >= 2:
+        return _STATE_TO_BRANCH.get(gstin[:2], "Other")
+    return "Other"
 
 _GSTIN_RE = re.compile(r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$')
 
@@ -65,6 +81,21 @@ _C_TAXABLE  = 9
 _C_IGST     = 10
 _C_CGST     = 11
 _C_SGST     = 12
+
+
+def detect_gstin_from_filename(filename: str) -> str:
+    """
+    Extract GSTIN from GST portal filename convention:
+      MMYYYY_GSTIN_GSTR2B_DDMMYYYY.xlsx
+    Returns the GSTIN string or '' if not found.
+    """
+    stem = re.sub(r'\.xlsx?$', '', filename, flags=re.IGNORECASE)
+    parts = stem.split('_')
+    # GSTIN is 15 alphanumeric chars; skip the first token (MMYYYY)
+    for part in parts[1:]:
+        if re.fullmatch(r'[0-9A-Z]{15}', part.upper()):
+            return part.upper()
+    return ""
 
 
 def detect_recon_month_from_filename(filename: str) -> str:
@@ -160,7 +191,11 @@ def process_gstr2b_file(
         or _detect_recon_month_from_metadata(file_bytes)
         or reconciliation_month
     )
-    logger.info("GSTR-2B: filename=%s detected recon_month=%s", filename, effective_recon_month)
+    # Detect branch from GSTIN state code in filename
+    gstin_in_filename = detect_gstin_from_filename(filename)
+    detected_branch = detect_branch_from_gstin(gstin_in_filename)
+    logger.info("GSTR-2B: filename=%s gstin=%s branch=%s recon_month=%s",
+                filename, gstin_in_filename, detected_branch, effective_recon_month)
 
     try:
         xf = pd.ExcelFile(io.BytesIO(file_bytes), engine="openpyxl")
@@ -236,6 +271,6 @@ def process_gstr2b_file(
 
     db.bulk_save_objects(entries)
     db.commit()
-    logger.info("Saved %d GSTR2BEntry records for session %d (recon_month=%s)",
-                len(entries), session_id, effective_recon_month)
-    return len(entries), effective_recon_month
+    logger.info("Saved %d GSTR2BEntry records for session %d (branch=%s recon_month=%s)",
+                len(entries), session_id, detected_branch, effective_recon_month)
+    return len(entries), effective_recon_month, detected_branch
