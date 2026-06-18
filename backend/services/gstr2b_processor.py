@@ -269,6 +269,7 @@ def process_gstr2b_file(
             cgst=cgst, sgst=sgst, igst=igst, total_gst=total_gst,
             val1=keys["val1"], val2=keys["val2"], val3=keys["val3"],
             val4=keys["val4"], val5=keys["val5"],
+            branch=detected_branch,
         ))
 
     db.bulk_save_objects(entries)

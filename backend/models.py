@@ -75,6 +75,7 @@ class GSTR2BEntry(Base):
     val3 = Column(String(500), nullable=True, index=True)
     val4 = Column(String(500), nullable=True, index=True)
     val5 = Column(String(500), nullable=True, index=True)
+    branch = Column(String(50), nullable=True, index=True)
 
     session = relationship("ReconciliationSession", back_populates="gstr2b_entries")
 
@@ -98,6 +99,7 @@ class ReconciliationResult(Base):
     invoice_month        = Column(String(7), nullable=True, index=True)   # MM-YYYY
     reconciliation_month = Column(String(7), nullable=True, index=True)
     month_year           = Column(String(7), nullable=True, index=True)   # same as invoice_month, kept for UI compat
+    branch               = Column(String(50), nullable=True, index=True)
 
     session      = relationship("ReconciliationSession", back_populates="results")
     books_entry  = relationship("BooksEntry",  foreign_keys=[books_entry_id])

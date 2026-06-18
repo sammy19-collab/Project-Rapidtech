@@ -187,6 +187,7 @@ def run_reconciliation(session_id: int, db: Session) -> dict:
             invoice_month=b.invoice_month,
             reconciliation_month=b.reconciliation_month,
             month_year=b.invoice_month,
+            branch=best_g.branch if best_g else None,
         ))
 
         if category == _CAT_EXACT:        summary["exact_match"]    += 1
@@ -213,6 +214,7 @@ def run_reconciliation(session_id: int, db: Session) -> dict:
                 invoice_month=g.invoice_month,
                 reconciliation_month=g.reconciliation_month,
                 month_year=g.invoice_month,
+                branch=g.branch,
             ))
             summary["missing_in_books"] += 1
 

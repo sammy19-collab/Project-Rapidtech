@@ -12,20 +12,26 @@ export default function Dashboard() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [monthFilter, setMonthFilter] = useState('')
+  const [branchFilter, setBranchFilter] = useState('')
 
-  const fetchDashboard = (mf) => {
+  const fetchDashboard = (mf, bf) => {
     setLoading(true)
-    getDashboard(sessionId, mf || undefined)
+    getDashboard(sessionId, mf || undefined, bf || undefined)
       .then(r => setData(r.data))
       .catch(() => setData(null))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { fetchDashboard('') }, [sessionId])
+  useEffect(() => { fetchDashboard('', '') }, [sessionId])
 
   const handleMonthChange = (m) => {
     setMonthFilter(m)
-    fetchDashboard(m)
+    fetchDashboard(m, branchFilter)
+  }
+
+  const handleBranchChange = (b) => {
+    setBranchFilter(b)
+    fetchDashboard(monthFilter, b)
   }
 
   if (loading) return <div className="text-center py-20 text-slate-400">Loading dashboard...</div>
@@ -50,22 +56,47 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Month filter */}
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-slate-400">Filter by month:</label>
-          <select
-            value={monthFilter}
-            onChange={e => handleMonthChange(e.target.value)}
-            className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
-          >
-            <option value="">All Months</option>
-            {(data.available_months || []).map(m => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-          {monthFilter && (
-            <button onClick={() => handleMonthChange('')} className="text-xs text-slate-400 hover:text-slate-200 underline">Clear</button>
+        <div className="flex flex-wrap items-center gap-4">
+          {/* Branch filter */}
+          {(data.available_branches?.length > 0) && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-400">Branch:</label>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => handleBranchChange('')}
+                  className={`px-2.5 py-1 rounded text-xs font-mono font-semibold transition-colors ${!branchFilter ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+                >
+                  All
+                </button>
+                {data.available_branches.map(b => (
+                  <button
+                    key={b}
+                    onClick={() => handleBranchChange(b)}
+                    className={`px-2.5 py-1 rounded text-xs font-mono font-semibold transition-colors ${branchFilter === b ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+                  >
+                    {b}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
+          {/* Month filter */}
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-400">Month:</label>
+            <select
+              value={monthFilter}
+              onChange={e => handleMonthChange(e.target.value)}
+              className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+            >
+              <option value="">All Months</option>
+              {(data.available_months || []).map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+            {monthFilter && (
+              <button onClick={() => handleMonthChange('')} className="text-xs text-slate-400 hover:text-slate-200 underline">Clear</button>
+            )}
+          </div>
         </div>
       </div>
 

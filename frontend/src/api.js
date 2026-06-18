@@ -25,7 +25,7 @@ export const getProbable = (sessionId, monthYear) => api.get(`/results/${session
 export const getMissingInBooks = (sessionId, monthYear) => api.get(`/results/${sessionId}/missing-in-books`, { params: monthYear ? { month_year: monthYear } : {} })
 export const getMissingInGSTR2B = (sessionId, monthYear) => api.get(`/results/${sessionId}/missing-in-gstr2b`, { params: monthYear ? { month_year: monthYear } : {} })
 
-export const getDashboard = (sessionId, monthYear) => api.get(`/dashboard/${sessionId}`, { params: monthYear ? { month_year: monthYear } : {} })
+export const getDashboard = (sessionId, monthYear, branch) => api.get(`/dashboard/${sessionId}`, { params: { ...(monthYear ? { month_year: monthYear } : {}), ...(branch ? { branch } : {}) } })
 
 export const getTallyPreview = (sessionId, month, year) => api.get(`/tally/${sessionId}/preview`, { params: { ...(month ? { month } : {}), ...(year ? { year } : {}) } })
 export const downloadTallyXml = (sessionId) => api.get(`/tally/${sessionId}/xml`, { responseType: 'blob' })
