@@ -45,6 +45,8 @@ from utils.cleaner import (
     safe_decimal,
 )
 
+logger = logging.getLogger(__name__)
+
 _STATE_TO_BRANCH = {
     "03": "PUN",  # Punjab
     "07": "DEL",  # Delhi
