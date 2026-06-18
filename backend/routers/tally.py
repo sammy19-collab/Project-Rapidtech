@@ -4,8 +4,9 @@ Tally router: generate and download Tally XML import files.
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
+from sqlalchemy import distinct
 
 from database import get_db
 from models import ReconciliationResult, ReconciliationSession
@@ -33,7 +34,12 @@ def _check_session(session_id: int, db: Session) -> ReconciliationSession:
 
 
 @router.get("/{session_id}/xml")
-async def download_tally_xml(session_id: int, db: Session = Depends(get_db)):
+async def download_tally_xml(
+    session_id: int,
+    month: str = Query(None),
+    year: str = Query(None),
+    db: Session = Depends(get_db),
+):
     """
     Generate and return a Tally-compatible XML file for all reconciled invoices
     (Exact Match + Strong Match) as a downloadable attachment.
@@ -41,7 +47,7 @@ async def download_tally_xml(session_id: int, db: Session = Depends(get_db)):
     _check_session(session_id, db)
 
     try:
-        xml_content = generate_tally_xml(session_id, db)
+        xml_content = generate_tally_xml(session_id, db, month=month, year=year)
     except Exception as exc:
         logger.exception("Tally XML generation failed for session %d", session_id)
         raise HTTPException(
@@ -58,7 +64,12 @@ async def download_tally_xml(session_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{session_id}/preview")
-async def preview_tally_xml(session_id: int, db: Session = Depends(get_db)):
+async def preview_tally_xml(
+    session_id: int,
+    month: str = Query(None),
+    year: str = Query(None),
+    db: Session = Depends(get_db),
+):
     """
     Return a preview of the Tally XML limited to the first 5 vouchers.
     Response is returned as JSON containing the XML string.
@@ -66,7 +77,7 @@ async def preview_tally_xml(session_id: int, db: Session = Depends(get_db)):
     _check_session(session_id, db)
 
     try:
-        xml_content = generate_tally_xml(session_id, db, limit=5)
+        xml_content = generate_tally_xml(session_id, db, limit=5, month=month, year=year)
     except Exception as exc:
         logger.exception("Tally XML preview failed for session %d", session_id)
         raise HTTPException(
@@ -83,9 +94,31 @@ async def preview_tally_xml(session_id: int, db: Session = Depends(get_db)):
         .count()
     )
 
+    # Build filtered count
+    filtered_q = db.query(ReconciliationResult).filter(
+        ReconciliationResult.session_id == session_id,
+        ReconciliationResult.match_category.in_(["Exact Match", "Strong Match"]),
+    )
+    if month:
+        filtered_q = filtered_q.filter(ReconciliationResult.invoice_month == month)
+    elif year:
+        filtered_q = filtered_q.filter(ReconciliationResult.invoice_month.like(f"%-{year}"))
+    filtered_count = filtered_q.count()
+
+    # Available months and years
+    months = [r[0] for r in db.query(distinct(ReconciliationResult.invoice_month)).filter(
+        ReconciliationResult.session_id == session_id,
+        ReconciliationResult.match_category.in_(["Exact Match", "Strong Match"]),
+        ReconciliationResult.invoice_month.isnot(None)
+    ).order_by(ReconciliationResult.invoice_month).all()]
+    years = sorted({m.split("-")[1] for m in months if m and "-" in m})
+
     return {
         "session_id": session_id,
         "preview_vouchers": 5,
         "total_reconciled": total_reconciled,
+        "filtered_count": filtered_count,
+        "available_months": months,
+        "available_years": years,
         "xml_preview": xml_content,
     }

@@ -85,7 +85,7 @@ def _build_voucher(parent: Element, result: ReconciliationResult, books: BooksEn
     SubElement(bill_alloc, "AMOUNT").text = str(total.quantize(Decimal("0.01")))
 
 
-def generate_tally_xml(session_id: int, db: Session, limit: int = None) -> str:
+def generate_tally_xml(session_id: int, db: Session, limit: int = None, month: str = None, year: str = None) -> str:
     """
     Fetch reconciled results for the session and produce a Tally XML import string.
     """
@@ -97,6 +97,10 @@ def generate_tally_xml(session_id: int, db: Session, limit: int = None) -> str:
             ReconciliationResult.books_entry_id.isnot(None),
         )
     )
+    if month:
+        query = query.filter(ReconciliationResult.invoice_month == month)
+    elif year:
+        query = query.filter(ReconciliationResult.invoice_month.like(f"%-{year}"))
     if limit:
         query = query.limit(limit)
     results = query.all()

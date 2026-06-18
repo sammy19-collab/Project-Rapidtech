@@ -39,6 +39,7 @@ export default function Layout({ children }) {
                 <Link to={`/tally/${sessionId}`} className="text-slate-300 hover:text-blue-400 transition-colors">Tally Export</Link>
               </nav>
             )}
+            <Link to="/history" className="text-slate-300 hover:text-blue-400 transition-colors text-sm">History</Link>
             <Link to="/" className="text-slate-500 hover:text-slate-300 text-xs">+ New</Link>
             <span className="text-slate-500 text-xs font-mono">{today}</span>
           </div>

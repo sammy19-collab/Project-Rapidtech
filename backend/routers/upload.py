@@ -2,7 +2,7 @@ import logging
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from database import get_db
-from models import AuditLog, ReconciliationSession
+from models import AuditLog, ReconciliationSession, GSTR2BUpload
 from services.books_processor import process_books_file
 from services.gstr2b_processor import process_gstr2b_file
 
@@ -97,7 +97,7 @@ async def upload_gstr2b(
         logger.exception("Error processing GSTR-2B for session %d", session_id)
         raise HTTPException(500, f"Failed to process file: {exc}")
 
-    session_obj.gstr2b_filename = file.filename
+    db.add(GSTR2BUpload(session_id=session_id, filename=file.filename, record_count=gstr2b_count))
     session_obj.status = "ready_to_reconcile"
     db.add(AuditLog(
         session_id=session_id,
@@ -113,6 +113,16 @@ async def upload_gstr2b(
     }
 
 
+@router.get("/sessions/{session_id}/gstr2b-files")
+def get_gstr2b_files(session_id: int, db: Session = Depends(get_db)):
+    files = db.query(GSTR2BUpload).filter(GSTR2BUpload.session_id == session_id).order_by(GSTR2BUpload.uploaded_at).all()
+    total = sum(f.record_count for f in files)
+    return {
+        "files": [{"filename": f.filename, "record_count": f.record_count, "uploaded_at": f.uploaded_at.isoformat()} for f in files],
+        "total_records": total
+    }
+
+
 @router.get("/sessions")
 def list_sessions(branch: str = None, recon_month: str = None, db: Session = Depends(get_db)):
     q = db.query(ReconciliationSession).order_by(ReconciliationSession.created_at.desc())
@@ -120,7 +130,7 @@ def list_sessions(branch: str = None, recon_month: str = None, db: Session = Dep
         q = q.filter(ReconciliationSession.branch == branch.upper())
     if recon_month:
         q = q.filter(ReconciliationSession.recon_month == recon_month)
-    return [_session_dict(s) for s in q.limit(50).all()]
+    return [_session_dict(s, db) for s in q.limit(50).all()]
 
 
 @router.get("/sessions/{session_id}")
@@ -128,7 +138,7 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
     s = db.query(ReconciliationSession).filter(ReconciliationSession.id == session_id).first()
     if not s:
         raise HTTPException(404, f"Session {session_id} not found.")
-    return _session_dict(s)
+    return _session_dict(s, db)
 
 
 @router.delete("/sessions/{session_id}")
@@ -141,8 +151,8 @@ def delete_session(session_id: int, db: Session = Depends(get_db)):
     return {"deleted": session_id}
 
 
-def _session_dict(s: ReconciliationSession) -> dict:
-    return {
+def _session_dict(s: ReconciliationSession, db=None) -> dict:
+    d = {
         "id": s.id,
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "status": s.status,
@@ -152,3 +162,12 @@ def _session_dict(s: ReconciliationSession) -> dict:
         "recon_month": s.recon_month,
         "recon_year": s.recon_year,
     }
+    if db:
+        from models import BooksEntry, GSTR2BEntry, GSTR2BUpload, ReconciliationResult
+        from sqlalchemy import func
+        d["books_count"] = db.query(func.count(BooksEntry.id)).filter(BooksEntry.session_id == s.id).scalar() or 0
+        d["gstr2b_count"] = db.query(func.count(GSTR2BEntry.id)).filter(GSTR2BEntry.session_id == s.id).scalar() or 0
+        d["gstr2b_file_count"] = db.query(func.count(GSTR2BUpload.id)).filter(GSTR2BUpload.session_id == s.id).scalar() or 0
+        cats = db.query(ReconciliationResult.match_category, func.count(ReconciliationResult.id)).filter(ReconciliationResult.session_id == s.id).group_by(ReconciliationResult.match_category).all()
+        d["result_counts"] = {c: n for c, n in cats}
+    return d

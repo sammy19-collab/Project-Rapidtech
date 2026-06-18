@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import StepIndicator from '../components/StepIndicator'
 import UploadZone from '../components/UploadZone'
-import { getBranches, uploadBooks, uploadGSTR2B, runReconciliation } from '../api'
+import { getBranches, uploadBooks, uploadGSTR2B, runReconciliation, getGstr2bFiles } from '../api'
 
 const STEPS = ['Select Branch & Month', 'Upload Books', 'Upload GSTR-2B', 'Reconcile']
 
@@ -30,9 +30,10 @@ export default function Home() {
   const [reconMonth, setReconMonth] = useState(getMonthOptions()[1].val)
   const [sessionId, setSessionId] = useState(null)
   const [booksStatus, setBooksStatus] = useState('idle')
-  const [gstrStatus, setGstrStatus] = useState('idle')
+  const [gstrUploading, setGstrUploading] = useState(false)
   const [booksInfo, setBooksInfo] = useState(null)
-  const [gstrInfo, setGstrInfo] = useState(null)
+  const [gstrFiles, setGstrFiles] = useState([])
+  const [gstrTotal, setGstrTotal] = useState(0)
   const [reconciling, setReconciling] = useState(false)
   const [summary, setSummary] = useState(null)
 
@@ -63,15 +64,17 @@ export default function Home() {
   }
 
   const handleGstrUpload = async (file) => {
-    setGstrStatus('loading')
+    setGstrUploading(true)
     try {
-      const res = await uploadGSTR2B(sessionId, file)
-      setGstrInfo(res.data)
-      setGstrStatus('success')
-      toast.success(`GSTR-2B loaded: ${res.data.gstr2b_count} records`)
+      await uploadGSTR2B(sessionId, file)
+      const filesRes = await getGstr2bFiles(sessionId)
+      setGstrFiles(filesRes.data.files)
+      setGstrTotal(filesRes.data.total_records)
+      toast.success(`GSTR-2B loaded: ${file.name}`)
     } catch (e) {
-      setGstrStatus('error')
       toast.error(e.response?.data?.detail || 'Failed to upload GSTR-2B file')
+    } finally {
+      setGstrUploading(false)
     }
   }
 
@@ -85,6 +88,7 @@ export default function Home() {
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Reconciliation failed')
       setStep(2)
+      setReconciling(false)
     } finally {
       setReconciling(false)
     }
@@ -148,7 +152,7 @@ export default function Home() {
             <div className="flex items-center gap-3 text-sm">
               <span className="bg-blue-900 text-blue-300 px-3 py-1 rounded font-mono font-bold">{branch}</span>
               <span className="text-slate-400">{monthOptions.find(m => m.val === reconMonth)?.label}</span>
-              <button onClick={() => { setStep(0); setBooksStatus('idle'); setGstrStatus('idle'); setSessionId(null); setBooksInfo(null); setGstrInfo(null); setSummary(null) }}
+              <button onClick={() => { setStep(0); setBooksStatus('idle'); setGstrUploading(false); setSessionId(null); setBooksInfo(null); setGstrFiles([]); setGstrTotal(0); setSummary(null) }}
                 className="ml-auto text-xs text-slate-500 hover:text-slate-300 underline">
                 Change
               </button>
@@ -171,22 +175,47 @@ export default function Home() {
           />
         </div>
 
-        {/* Step 2: GSTR-2B */}
+        {/* Step 2: GSTR-2B (multi-file) */}
         <div className={`bg-slate-800 border border-slate-700 rounded-lg p-6 transition-opacity ${step < 2 ? 'opacity-40 pointer-events-none' : ''}`}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-slate-200">Step 3: Upload GSTR-2B Excel</h2>
-            {gstrInfo && <span className="text-green-400 text-sm font-mono">{gstrInfo.gstr2b_count} records</span>}
+            {gstrFiles.length > 0 && (
+              <span className="text-green-400 text-sm font-mono">
+                Total: {gstrTotal} records across {gstrFiles.length} file{gstrFiles.length !== 1 ? 's' : ''}
+              </span>
+            )}
           </div>
+
+          {/* Uploaded files list */}
+          {gstrFiles.length > 0 && (
+            <div className="mb-4 space-y-1.5">
+              {gstrFiles.map((f, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm bg-slate-700/40 rounded px-3 py-2">
+                  <span className="text-green-400">✓</span>
+                  <span className="text-slate-200 font-mono flex-1 truncate">{f.filename}</span>
+                  <span className="text-slate-400 text-xs font-mono">{f.record_count} records</span>
+                </div>
+              ))}
+              <div className="text-xs text-slate-400 pt-1 pl-1">
+                Total GSTR-2B records: <span className="text-slate-200 font-mono">{gstrTotal}</span> across <span className="text-slate-200 font-mono">{gstrFiles.length}</span> file{gstrFiles.length !== 1 ? 's' : ''}
+              </div>
+            </div>
+          )}
+
           <UploadZone
             onUpload={handleGstrUpload}
-            label={gstrStatus === 'success' ? `✓ ${gstrInfo?.filename}` : `Drop ${branch} GSTR-2B Excel here`}
+            label={gstrUploading ? 'Uploading...' : `Drop ${branch || ''} GSTR-2B Excel here`}
             description="Upload GSTR-2B Excel downloaded from GST portal (.xlsx / .xls)"
-            status={gstrStatus}
-            disabled={step !== 2 || gstrStatus === 'success'}
+            status={gstrUploading ? 'loading' : 'idle'}
+            disabled={step < 2 || gstrUploading}
           />
-          {gstrStatus === 'success' && (
-            <button onClick={handleReconcile}
-              className="mt-4 w-full bg-green-700 hover:bg-green-600 text-white font-semibold py-2.5 rounded transition-colors">
+
+          {gstrFiles.length > 0 && (
+            <button
+              onClick={handleReconcile}
+              disabled={reconciling}
+              className="mt-4 w-full bg-green-700 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded transition-colors"
+            >
               Run Reconciliation for {branch} — {monthOptions.find(m => m.val === reconMonth)?.label}
             </button>
           )}
@@ -200,7 +229,7 @@ export default function Home() {
               <div className="flex flex-col items-center gap-3 py-6">
                 <div className="w-10 h-10 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
                 <span className="text-slate-400 text-sm">
-                  Comparing {booksInfo?.books_count} books entries against {gstrInfo?.gstr2b_count} GSTR-2B entries...
+                  Comparing {booksInfo?.books_count} books entries against {gstrTotal} GSTR-2B entries...
                 </span>
               </div>
             ) : summary ? (

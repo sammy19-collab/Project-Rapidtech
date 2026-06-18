@@ -23,6 +23,7 @@ class ReconciliationSession(Base):
     gstr2b_entries = relationship("GSTR2BEntry",        back_populates="session", cascade="all, delete-orphan")
     results        = relationship("ReconciliationResult", back_populates="session", cascade="all, delete-orphan")
     audit_logs     = relationship("AuditLog",            back_populates="session", cascade="all, delete-orphan")
+    gstr2b_uploads = relationship("GSTR2BUpload",        back_populates="session", cascade="all, delete-orphan")
 
 
 class BooksEntry(Base):
@@ -101,6 +102,16 @@ class ReconciliationResult(Base):
     session      = relationship("ReconciliationSession", back_populates="results")
     books_entry  = relationship("BooksEntry",  foreign_keys=[books_entry_id])
     gstr2b_entry = relationship("GSTR2BEntry", foreign_keys=[gstr2b_entry_id])
+
+
+class GSTR2BUpload(Base):
+    __tablename__ = "gstr2b_uploads"
+    id           = Column(Integer, primary_key=True, index=True)
+    session_id   = Column(Integer, ForeignKey("reconciliation_sessions.id"), nullable=False, index=True)
+    filename     = Column(String(255), nullable=False)
+    record_count = Column(Integer, default=0)
+    uploaded_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
+    session = relationship("ReconciliationSession", back_populates="gstr2b_uploads")
 
 
 class AuditLog(Base):
