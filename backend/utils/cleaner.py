@@ -70,24 +70,32 @@ def generate_validation_keys(
     invoice_number: str,
     invoice_date,
     taxable_value,
-    reconciliation_month: str = "",  # MM-YYYY from upload selection
+    reconciliation_month: str = "",  # kept for signature compat, no longer used in keys
 ) -> dict:
     """
-    Generate 5 composite validation keys.
-    Uses reconciliation_month (filing period) — NOT invoice_month —
-    because GSTR-2B groups invoices by filing period, not invoice date.
+    Generate 5 composite validation keys keyed on invoice identity only.
+    reconciliation_month is NOT used — filing period varies between Books and
+    GSTR-2B so including it causes cross-period mismatches.
+
+    Cascade from most-specific to most-lenient:
+      val1: gstin + invoice_number + invoice_date + taxable_value  (all 4)
+      val2: gstin + invoice_number + invoice_date                  (no amount)
+      val3: gstin + invoice_number_strict + taxable_value          (normalised inv# + amount)
+      val4: gstin + invoice_number + taxable_value                 (inv# + amount, no date)
+      val5: gstin + invoice_number_strict                          (weakest — GSTIN + normalised inv#)
     """
-    g       = clean_gstin(gstin)
-    inv     = clean_invoice_number(invoice_number)
-    inv_s   = clean_invoice_number_strict(invoice_number)
-    tv      = safe_decimal(taxable_value)
-    tv_str  = str(tv)
-    rm      = reconciliation_month or ""
+    g      = clean_gstin(gstin)
+    inv    = clean_invoice_number(invoice_number)
+    inv_s  = clean_invoice_number_strict(invoice_number)
+    tv_str = str(safe_decimal(taxable_value))
+
+    _, date_obj = standardize_date(invoice_date)
+    date_str = date_obj.strftime("%Y%m%d") if date_obj else ""
 
     return {
-        "val1": g + inv  + rm + str(safe_float(taxable_value)),
-        "val2": g + inv  + rm + tv_str,
-        "val3": g + inv_s + rm + tv_str,
-        "val4": g + rm + tv_str,
-        "val5": g + tv_str,
+        "val1": g + inv   + date_str + tv_str,
+        "val2": g + inv   + date_str,
+        "val3": g + inv_s + tv_str,
+        "val4": g + inv   + tv_str,
+        "val5": g + inv_s,
     }
