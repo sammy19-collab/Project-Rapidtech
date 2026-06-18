@@ -39,11 +39,12 @@ export default function Home() {
   const handleGstrUpload = async (file) => {
     setGstrUploading(true)
     try {
-      await uploadGSTR2B(sessionId, file)
+      const res = await uploadGSTR2B(sessionId, file)
       const filesRes = await getGstr2bFiles(sessionId)
       setGstrFiles(filesRes.data.files)
       setGstrTotal(filesRes.data.total_records)
-      toast.success(`GSTR-2B loaded: ${file.name}`)
+      const period = res.data.detected_month ? ` (${res.data.detected_month})` : ''
+      toast.success(`GSTR-2B loaded: ${file.name}${period}`)
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Failed to upload GSTR-2B file')
     } finally {
@@ -109,7 +110,6 @@ export default function Home() {
               <span className="text-green-400 text-lg">✓</span>
               <span className="text-slate-200 font-mono truncate flex-1">{booksInfo?.filename}</span>
               <span className="bg-blue-900 text-blue-300 px-2 py-0.5 rounded font-mono text-xs font-bold">{booksInfo?.branch}</span>
-              <span className="text-slate-400 font-mono text-xs">{booksInfo?.recon_month}</span>
               <button onClick={handleReset} className="ml-2 text-xs text-slate-500 hover:text-slate-300 underline">
                 Start over
               </button>
@@ -154,7 +154,7 @@ export default function Home() {
               disabled={reconciling}
               className="mt-4 w-full bg-green-700 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded transition-colors"
             >
-              Reconcile {booksInfo?.branch} — {booksInfo?.recon_month}
+              Run Reconciliation ({gstrFiles.length} GSTR-2B file{gstrFiles.length !== 1 ? 's' : ''}, {gstrTotal} entries)
             </button>
           )}
         </div>

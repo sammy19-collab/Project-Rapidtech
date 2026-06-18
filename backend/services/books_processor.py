@@ -168,22 +168,9 @@ def process_books_file(file_bytes: bytes, session_id: int, db: Session,
         ))
 
     detected_branch = detect_branch_from_filename(filename) if filename else "Other"
-    effective_recon_month = reconciliation_month or detect_recon_month_from_entries(entries)
-
-    # Patch validation keys and reconciliation_month now that we know the period
-    if not reconciliation_month and effective_recon_month:
-        for e in entries:
-            keys = generate_validation_keys(
-                e.gstin or "", e.invoice_number or "", e.invoice_date,
-                e.taxable_value, effective_recon_month,
-            )
-            e.val1, e.val2, e.val3, e.val4, e.val5 = (
-                keys["val1"], keys["val2"], keys["val3"], keys["val4"], keys["val5"]
-            )
-            e.reconciliation_month = effective_recon_month
 
     db.bulk_save_objects(entries)
     db.commit()
-    logger.info("Saved %d BooksEntry records for session %d (branch=%s recon_month=%s)",
-                len(entries), session_id, detected_branch, effective_recon_month)
-    return len(entries), detected_branch, effective_recon_month
+    logger.info("Saved %d BooksEntry records for session %d (branch=%s)",
+                len(entries), session_id, detected_branch)
+    return len(entries), detected_branch

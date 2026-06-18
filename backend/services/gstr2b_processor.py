@@ -238,4 +238,4 @@ def process_gstr2b_file(
     db.commit()
     logger.info("Saved %d GSTR2BEntry records for session %d (recon_month=%s)",
                 len(entries), session_id, effective_recon_month)
-    return len(entries)
+    return len(entries), effective_recon_month

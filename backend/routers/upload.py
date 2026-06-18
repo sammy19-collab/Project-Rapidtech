@@ -34,7 +34,7 @@ async def upload_books(
 
     try:
         file_bytes = await file.read()
-        books_count, branch, recon_month = process_books_file(
+        books_count, branch = process_books_file(
             file_bytes, session_obj.id, db, filename=file.filename,
         )
     except ValueError as exc:
@@ -48,20 +48,17 @@ async def upload_books(
         raise HTTPException(500, f"Failed to process file: {exc}")
 
     session_obj.branch = branch
-    session_obj.recon_month = recon_month
-    session_obj.recon_year = recon_month.split("-")[0] if "-" in recon_month else None
     session_obj.status = "books_uploaded"
     db.add(AuditLog(
         session_id=session_obj.id,
         action="books_uploaded",
-        details=f"file={file.filename} branch={branch} recon_month={recon_month} records={books_count}",
+        details=f"file={file.filename} branch={branch} records={books_count}",
     ))
     db.commit()
     return {
         "session_id": session_obj.id,
         "books_count": books_count,
         "branch": branch,
-        "recon_month": recon_month,
         "filename": file.filename,
     }
 
@@ -82,9 +79,8 @@ async def upload_gstr2b(
 
     try:
         file_bytes = await file.read()
-        gstr2b_count = process_gstr2b_file(
+        gstr2b_count, detected_month = process_gstr2b_file(
             file_bytes, session_id, db,
-            reconciliation_month=session_obj.recon_month or "",
             filename=file.filename,
         )
     except ValueError as exc:
@@ -93,25 +89,25 @@ async def upload_gstr2b(
         logger.exception("Error processing GSTR-2B for session %d", session_id)
         raise HTTPException(500, f"Failed to process file: {exc}")
 
-    # Create GSTR2BUpload record
-    upload_record = GSTR2BUpload(
-        session_id=session_id,
-        filename=file.filename,
-        record_count=gstr2b_count,
-    )
-    db.add(upload_record)
+    db.add(GSTR2BUpload(session_id=session_id, filename=file.filename, record_count=gstr2b_count))
+
+    # Update session period from detected GSTR-2B month if not already set
+    if detected_month and not session_obj.recon_month:
+        session_obj.recon_month = detected_month
+        session_obj.recon_year = detected_month.split("-")[0]
 
     session_obj.gstr2b_filename = file.filename
     session_obj.status = "ready_to_reconcile"
     db.add(AuditLog(
         session_id=session_id,
         action="gstr2b_uploaded",
-        details=f"file={file.filename} records={gstr2b_count}",
+        details=f"file={file.filename} detected_month={detected_month} records={gstr2b_count}",
     ))
     db.commit()
     return {
         "session_id": session_id,
         "gstr2b_count": gstr2b_count,
+        "detected_month": detected_month,
         "status": session_obj.status,
         "filename": file.filename,
     }
