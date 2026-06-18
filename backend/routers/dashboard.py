@@ -6,7 +6,8 @@ from models import ReconciliationResult, ReconciliationSession
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
-fmt_inr = lambda n: round(n or 0, 2)
+fmt_inr = lambda n: round(float(n or 0), 2)
+_f = lambda v: float(v or 0)   # safe Decimal → float
 
 
 @router.get("/{session_id}")
@@ -32,8 +33,8 @@ def get_dashboard(session_id: int, month_year: str = Query(None), db: Session = 
     total_invoices = len(books_entries)
     recon_pct = round(len(reconciled) / total_invoices * 100, 1) if total_invoices else 0
 
-    total_itc     = sum(r.total_gst or 0 for r in reconciled)
-    potential_loss = sum(r.total_gst or 0 for r in manual)
+    total_itc     = sum(_f(r.total_gst) for r in reconciled)
+    potential_loss = sum(_f(r.total_gst) for r in manual)
 
     # Month-wise breakdown (always computed across ALL months for this session, ignoring filter)
     all_results = db.query(ReconciliationResult).filter(ReconciliationResult.session_id == session_id).all()
@@ -42,7 +43,7 @@ def get_dashboard(session_id: int, month_year: str = Query(None), db: Session = 
         m = r.month_year or "Unknown"
         if r.match_category in ("Exact Match", "Strong Match"):
             month_breakdown[m]["reconciled"] += 1
-            month_breakdown[m]["itc"] += r.total_gst or 0
+            month_breakdown[m]["itc"] += _f(r.total_gst)
         elif r.match_category == "Probable Match":
             month_breakdown[m]["probable"] += 1
         elif r.match_category == "Manual Review":
@@ -62,7 +63,7 @@ def get_dashboard(session_id: int, month_year: str = Query(None), db: Session = 
     for r in results:
         if r.books_entry_id:
             v = r.vendor_name or "Unknown"
-            vendor_amounts[v] += r.taxable_value or 0
+            vendor_amounts[v] += _f(r.taxable_value)
             vendor_totals[v]  += 1
             if r.match_category in ("Exact Match", "Strong Match"):
                 vendor_matched[v] += 1
