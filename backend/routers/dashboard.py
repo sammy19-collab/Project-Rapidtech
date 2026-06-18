@@ -1,4 +1,5 @@
 from collections import defaultdict
+import re as _re
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 from database import get_db
@@ -8,6 +9,15 @@ router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
 fmt_inr = lambda n: round(float(n or 0), 2)
 _f = lambda v: float(v or 0)
+
+def _filing_month(r) -> str:
+    """Return the GSTR-2B filing month for a result row as MM-YYYY.
+    Uses reconciliation_month (filing period) when available,
+    normalising YYYY-MM → MM-YYYY, and falls back to month_year."""
+    m = r.reconciliation_month or ""
+    if _re.match(r'^\d{4}-\d{2}$', m):   # YYYY-MM → MM-YYYY
+        return m[5:] + "-" + m[:4]
+    return m or r.month_year or "Unknown"
 
 
 @router.get("/{session_id}")
@@ -22,14 +32,14 @@ def get_dashboard(session_id: int, month_year: str = Query(None), branch: str = 
 
     # Available branches and months always computed from full results
     available_branches = sorted({r.branch for r in all_results if r.branch})
-    available_months   = sorted({r.month_year for r in all_results if r.month_year})
+    available_months   = sorted({_filing_month(r) for r in all_results if _filing_month(r) != "Unknown"})
 
     # Apply filters
     results = all_results
     if branch:
         results = [r for r in results if r.branch == branch]
     if month_year:
-        results = [r for r in results if r.month_year == month_year]
+        results = [r for r in results if _filing_month(r) == month_year]
 
     reconciled = [r for r in results if r.match_category in ("Exact Match", "Strong Match")]
     probable   = [r for r in results if r.match_category == "Probable Match"]
@@ -46,7 +56,7 @@ def get_dashboard(session_id: int, month_year: str = Query(None), branch: str = 
     base = [r for r in all_results if (not branch or r.branch == branch)]
     month_breakdown = defaultdict(lambda: {"reconciled": 0, "probable": 0, "manual": 0, "missing_books": 0, "itc": 0.0})
     for r in base:
-        m = r.month_year or "Unknown"
+        m = _filing_month(r)
         if r.match_category in ("Exact Match", "Strong Match"):
             month_breakdown[m]["reconciled"] += 1
             month_breakdown[m]["itc"] += _f(r.total_gst)
