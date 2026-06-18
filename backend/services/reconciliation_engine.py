@@ -1,27 +1,73 @@
 """
 Core reconciliation engine: O(n) hash-based matching of BooksEntry against
 GSTR2BEntry rows using five composite validation keys.
+
+Books stores LINE ITEMS (multiple rows per invoice); GSTR-2B stores INVOICE
+TOTALS (one row per invoice). We aggregate Books line items by
+(gstin, invoice_number) before matching so amounts compare correctly.
 """
 
 import logging
 from collections import defaultdict
-from datetime import date
 from decimal import Decimal
 from typing import Dict, List, Optional, Set
 
 from sqlalchemy.orm import Session
 
 from models import AuditLog, BooksEntry, GSTR2BEntry, ReconciliationResult, ReconciliationSession
+from utils.cleaner import generate_validation_keys
 
 logger = logging.getLogger(__name__)
 
 _MATCH_KEYS = ["val1", "val2", "val3", "val4", "val5"]
 
-_CAT_EXACT        = "Exact Match"
-_CAT_STRONG       = "Strong Match"
-_CAT_PROBABLE     = "Probable Match"
-_CAT_MANUAL       = "Manual Review"
+_CAT_EXACT         = "Exact Match"
+_CAT_STRONG        = "Strong Match"
+_CAT_PROBABLE      = "Probable Match"
+_CAT_MANUAL        = "Manual Review"
 _CAT_MISSING_BOOKS = "Missing in Books"
+
+_D0 = Decimal("0")
+
+
+class _AggBooks:
+    """Aggregated Books invoice — sums all line items for one GSTIN+invoice."""
+    __slots__ = (
+        "id", "all_ids", "vendor_name", "gstin", "invoice_number",
+        "invoice_date", "invoice_month", "reconciliation_month",
+        "taxable_value", "cgst", "sgst", "igst", "total_gst",
+        "val1", "val2", "val3", "val4", "val5",
+    )
+
+    def __init__(self, entries: List[BooksEntry]):
+        first = entries[0]
+        self.id             = first.id
+        self.all_ids        = [e.id for e in entries]
+        self.vendor_name    = first.vendor_name
+        self.gstin          = first.gstin
+        self.invoice_number = first.invoice_number
+        self.invoice_date   = first.invoice_date
+        self.invoice_month  = first.invoice_month
+        self.reconciliation_month = first.reconciliation_month
+
+        self.taxable_value = sum((e.taxable_value or _D0) for e in entries)
+        self.cgst          = sum((e.cgst          or _D0) for e in entries)
+        self.sgst          = sum((e.sgst          or _D0) for e in entries)
+        self.igst          = sum((e.igst          or _D0) for e in entries)
+        self.total_gst     = self.cgst + self.sgst + self.igst
+
+        # Re-compute validation keys with aggregated totals
+        inv_date_str = str(self.invoice_date) if self.invoice_date else ""
+        keys = generate_validation_keys(
+            self.gstin, self.invoice_number,
+            inv_date_str, self.taxable_value,
+            self.reconciliation_month or "",
+        )
+        self.val1 = keys["val1"]
+        self.val2 = keys["val2"]
+        self.val3 = keys["val3"]
+        self.val4 = keys["val4"]
+        self.val5 = keys["val5"]
 
 
 def _category_for_score(score: int) -> str:
@@ -31,19 +77,7 @@ def _category_for_score(score: int) -> str:
     return _CAT_MANUAL
 
 
-def _month_year_from_date(d) -> Optional[str]:
-    """Return MM-YYYY from a date object or string."""
-    if d is None:
-        return None
-    if isinstance(d, date):
-        return d.strftime("%m-%Y")
-    parts = str(d).split("-")
-    if len(parts) == 3 and len(parts[2]) == 4:
-        return f"{parts[1]}-{parts[2]}"
-    return None
-
-
-def _mismatch_reason(score: int, b: BooksEntry, g: Optional[GSTR2BEntry]) -> Optional[str]:
+def _mismatch_reason(score: int, b: _AggBooks, g: Optional[GSTR2BEntry]) -> Optional[str]:
     if score == 5:
         return None
     if g is None:
@@ -55,33 +89,41 @@ def _mismatch_reason(score: int, b: BooksEntry, g: Optional[GSTR2BEntry]) -> Opt
         reasons.append("Invoice number mismatch")
     if b.invoice_date != g.invoice_date:
         reasons.append("Invoice date mismatch")
-    b_tv = b.taxable_value or Decimal("0")
-    g_tv = g.taxable_value or Decimal("0")
-    if abs(b_tv - g_tv) > Decimal("1.00"):
-        reasons.append("Taxable value mismatch")
+    if abs((b.taxable_value or _D0) - (g.taxable_value or _D0)) > Decimal("1.00"):
+        reasons.append(f"Taxable value mismatch (Books:{b.taxable_value} vs GSTR:{g.taxable_value})")
     return "; ".join(reasons) if reasons else "Partial key mismatch"
 
 
 def run_reconciliation(session_id: int, db: Session) -> dict:
     """
-    O(n) hash-based reconciliation. For each books entry, look up candidates
-    from val1→val5 indexes (highest key = best match). One-to-one: each GSTR-2B
-    entry can only be matched once.
+    Aggregate Books line items per invoice, then O(n) hash-match against GSTR-2B.
+    One-to-one: each GSTR-2B entry is matched at most once.
     """
-    # Delete prior results for re-run support
     db.query(ReconciliationResult).filter(
         ReconciliationResult.session_id == session_id
     ).delete(synchronize_session=False)
     db.flush()
 
-    books: List[BooksEntry] = (
+    raw_books: List[BooksEntry] = (
         db.query(BooksEntry).filter(BooksEntry.session_id == session_id).all()
     )
     gstr2b: List[GSTR2BEntry] = (
         db.query(GSTR2BEntry).filter(GSTR2BEntry.session_id == session_id).all()
     )
 
-    # Build inverted indexes: {key_value -> [GSTR2BEntry, ...]} for each val slot
+    # Aggregate Books line items → one entry per (gstin, invoice_number)
+    groups: Dict[tuple, List[BooksEntry]] = defaultdict(list)
+    for b in raw_books:
+        key = (b.gstin or "", b.invoice_number or "")
+        groups[key].append(b)
+    agg_books: List[_AggBooks] = [_AggBooks(v) for v in groups.values()]
+
+    logger.info(
+        "Session %d: %d raw books rows → %d unique invoices, %d GSTR-2B entries",
+        session_id, len(raw_books), len(agg_books), len(gstr2b),
+    )
+
+    # Build inverted indexes for GSTR-2B
     val_indexes: List[Dict[str, List[GSTR2BEntry]]] = [defaultdict(list) for _ in range(5)]
     for g in gstr2b:
         for i, key in enumerate(_MATCH_KEYS):
@@ -90,9 +132,9 @@ def run_reconciliation(session_id: int, db: Session) -> dict:
                 val_indexes[i][val].append(g)
 
     matched_gstr_ids: Set[int] = set()
-
+    results: List[ReconciliationResult] = []
     summary: Dict[str, int] = {
-        "total_books": len(books),
+        "total_books": len(raw_books),
         "total_gstr2b": len(gstr2b),
         "exact_match": 0,
         "strong_match": 0,
@@ -101,10 +143,7 @@ def run_reconciliation(session_id: int, db: Session) -> dict:
         "missing_in_books": 0,
     }
 
-    results: List[ReconciliationResult] = []
-
-    for b in books:
-        # Collect candidate scores: {gstr_id -> score}
+    for b in agg_books:
         candidate_scores: Dict[int, int] = defaultdict(int)
         candidate_map: Dict[int, GSTR2BEntry] = {}
 
