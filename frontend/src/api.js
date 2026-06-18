@@ -33,4 +33,5 @@ export const downloadTallyXml = (sessionId) => api.get(`/tally/${sessionId}/xml`
 export const getSessions = (branch, reconMonth) => api.get('/sessions', { params: { ...(branch ? { branch } : {}), ...(reconMonth ? { recon_month: reconMonth } : {}) } })
 
 export const getGstr2bFiles = (sessionId) => api.get(`/sessions/${sessionId}/gstr2b-files`)
+export const deleteSession = (sessionId) => api.delete(`/sessions/${sessionId}`)
 export const downloadTallyXmlFiltered = (sessionId, month, year) => api.get(`/tally/${sessionId}/xml`, { responseType: 'blob', params: { ...(month ? { month } : {}), ...(year ? { year } : {}) } })

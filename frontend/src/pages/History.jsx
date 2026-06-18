@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getSessions } from '../api'
+import { getSessions, deleteSession } from '../api'
 
 const BRANCHES = ['AP', 'BLR', 'BBSR', 'HYD', 'MUM', 'DEL', 'CHN', 'KOL', 'PUN', 'Other']
 
@@ -23,6 +23,8 @@ export default function History() {
   const [loading, setLoading] = useState(true)
   const [filterBranch, setFilterBranch] = useState('')
   const [filterYear, setFilterYear] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(null) // session object to delete
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     setLoading(true)
@@ -34,6 +36,18 @@ export default function History() {
 
   const years = [...new Set(sessions.map(s => s.recon_year).filter(Boolean))].sort().reverse()
   const filtered = filterYear ? sessions.filter(s => s.recon_year === filterYear) : sessions
+
+  const handleDelete = () => {
+    if (!confirmDelete) return
+    setDeleting(true)
+    deleteSession(confirmDelete.id)
+      .then(() => {
+        setSessions(prev => prev.filter(s => s.id !== confirmDelete.id))
+        setConfirmDelete(null)
+      })
+      .catch(() => alert('Failed to delete session. Please try again.'))
+      .finally(() => setDeleting(false))
+  }
 
   const cnt = (s, cat) => {
     if (!s.result_counts) return '—'
@@ -122,21 +136,48 @@ export default function History() {
                   <td className="py-3 px-4 text-right font-mono text-red-400">{cnt(s, 'manual')}</td>
                   <td className="py-3 px-4 text-right font-mono text-purple-400">{cnt(s, 'missing')}</td>
                   <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
-                    {s.status === 'completed' ? (
-                      <div className="flex justify-center gap-1.5">
+                    <div className="flex justify-center gap-1.5 flex-wrap">
+                      {s.status === 'completed' && (<>
                         <button onClick={() => navigate(`/dashboard/${s.id}`)}
                           className="text-xs bg-blue-900 hover:bg-blue-800 text-blue-300 px-2 py-1 rounded">Dashboard</button>
                         <button onClick={() => navigate(`/results/${s.id}`)}
                           className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-2 py-1 rounded">Results</button>
                         <button onClick={() => navigate(`/tally/${s.id}`)}
                           className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-2 py-1 rounded">Tally</button>
-                      </div>
-                    ) : <span className="text-slate-500 text-xs text-center block">—</span>}
+                      </>)}
+                      <button onClick={() => setConfirmDelete(s)}
+                        className="text-xs bg-red-900 hover:bg-red-800 text-red-300 px-2 py-1 rounded">Delete</button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {/* Delete confirmation modal */}
+      {confirmDelete && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-slate-800 border border-slate-600 rounded-lg p-6 max-w-sm w-full mx-4 shadow-xl">
+            <h3 className="text-slate-100 font-semibold text-lg mb-2">Delete Session?</h3>
+            <p className="text-slate-400 text-sm mb-1">
+              Branch: <span className="text-slate-200 font-mono">{confirmDelete.branch || '—'}</span>
+              {' · '}Period: <span className="text-slate-200 font-mono">{confirmDelete.recon_month || '—'}</span>
+            </p>
+            <p className="text-red-400 text-sm mb-5">
+              This will permanently delete all uploaded data and reconciliation results for this session.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setConfirmDelete(null)} disabled={deleting}
+                className="px-4 py-2 text-sm bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleDelete} disabled={deleting}
+                className="px-4 py-2 text-sm bg-red-700 hover:bg-red-600 text-white rounded transition-colors disabled:opacity-50">
+                {deleting ? 'Deleting...' : 'Yes, Delete'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
