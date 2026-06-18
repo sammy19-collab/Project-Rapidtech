@@ -85,6 +85,7 @@ async def upload_gstr2b(
         gstr2b_count = process_gstr2b_file(
             file_bytes, session_id, db,
             reconciliation_month=session_obj.recon_month or "",
+            filename=file.filename,
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
