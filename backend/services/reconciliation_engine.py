@@ -29,6 +29,14 @@ _CAT_MISSING_BOOKS = "Missing in Books"
 
 _D0 = Decimal("0")
 
+import re as _re
+def _filing_month(gstr_entry) -> str:
+    """Return filing month as MM-YYYY, normalising YYYY-MM if needed."""
+    m = gstr_entry.reconciliation_month or ""
+    if _re.match(r'^\d{4}-\d{2}$', m):          # YYYY-MM → MM-YYYY
+        return m[5:] + "-" + m[:4]
+    return m or gstr_entry.invoice_month or ""
+
 
 class _AggBooks:
     """Aggregated Books invoice — sums all line items for one GSTIN+invoice."""
@@ -186,7 +194,7 @@ def run_reconciliation(session_id: int, db: Session) -> dict:
             total_gst=b.total_gst,
             invoice_month=b.invoice_month,
             reconciliation_month=b.reconciliation_month,
-            month_year=best_g.reconciliation_month if best_g else b.invoice_month,
+            month_year=_filing_month(best_g) if best_g else b.invoice_month,
             branch=best_g.branch if best_g else None,
         ))
 
@@ -213,7 +221,7 @@ def run_reconciliation(session_id: int, db: Session) -> dict:
                 total_gst=g.total_gst,
                 invoice_month=g.invoice_month,
                 reconciliation_month=g.reconciliation_month,
-                month_year=g.reconciliation_month,
+                month_year=_filing_month(g),
                 branch=g.branch,
             ))
             summary["missing_in_books"] += 1
