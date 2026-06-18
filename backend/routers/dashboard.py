@@ -47,7 +47,7 @@ def get_dashboard(session_id: int, month_year: str = Query(None), branch: str = 
     miss_books = [r for r in results if r.match_category == "Missing in Books"]
 
     books_entries  = [r for r in results if r.books_entry_id]
-    total_invoices = len(books_entries)
+    total_invoices = len(books_entries) + len(miss_books)
     recon_pct      = round(len(reconciled) / total_invoices * 100, 1) if total_invoices else 0
     total_itc      = sum(_f(r.total_gst) for r in reconciled)
     potential_loss = sum(_f(r.total_gst) for r in manual)
