@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import get_db
@@ -22,6 +22,7 @@ def list_branches():
 @router.post("/upload/books")
 async def upload_books(
     file: UploadFile = File(...),
+    branch: str = Form(None),   # optional — user-selected branch overrides filename detection
     db: Session = Depends(get_db),
 ):
     if not file.filename.lower().endswith((".xlsx", ".xls")):
@@ -34,7 +35,7 @@ async def upload_books(
 
     try:
         file_bytes = await file.read()
-        books_count, branch = process_books_file(
+        books_count, detected_branch = process_books_file(
             file_bytes, session_obj.id, db, filename=file.filename,
         )
     except ValueError as exc:
@@ -47,12 +48,14 @@ async def upload_books(
         db.commit()
         raise HTTPException(500, f"Failed to process file: {exc}")
 
+    # User-selected branch takes priority over filename detection
+    branch = branch.upper().strip() if branch else detected_branch
     session_obj.branch = branch
     session_obj.status = "books_uploaded"
     db.add(AuditLog(
         session_id=session_obj.id,
         action="books_uploaded",
-        details=f"file={file.filename} branch={branch} records={books_count}",
+        details=f"file={file.filename} branch={branch} detected={detected_branch} records={books_count}",
     ))
     db.commit()
     return {

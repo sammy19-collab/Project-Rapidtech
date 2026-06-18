@@ -1,16 +1,20 @@
 import { useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
 
-export default function UploadZone({ onUpload, label, description, status, disabled }) {
+export default function UploadZone({ onUpload, label, description, status, disabled, multiple = false }) {
   const onDrop = useCallback((files) => {
-    if (files[0]) onUpload(files[0])
-  }, [onUpload])
+    if (multiple) {
+      files.forEach(f => onUpload(f))
+    } else {
+      if (files[0]) onUpload(files[0])
+    }
+  }, [onUpload, multiple])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 'application/vnd.ms-excel': ['.xls'] },
     disabled: disabled || status === 'loading' || status === 'success',
-    multiple: false,
+    multiple,
   })
 
   const borderColor = isDragActive ? 'border-blue-400 bg-blue-950' :
@@ -36,6 +40,7 @@ export default function UploadZone({ onUpload, label, description, status, disab
           <div className="text-4xl text-slate-500">📂</div>
           <div className="text-slate-300 font-medium">{label}</div>
           <div className="text-slate-500 text-sm">{description || 'Drop .xlsx or .xls file here, or click to browse'}</div>
+          {multiple && <div className="text-slate-600 text-xs">You can select multiple files at once</div>}
         </div>
       )}
     </div>
