@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import get_db
@@ -22,30 +22,21 @@ def list_branches():
 @router.post("/upload/books")
 async def upload_books(
     file: UploadFile = File(...),
-    branch: str = Form(...),
-    recon_month: str = Form(...),   # "YYYY-MM" e.g. "2024-03"
     db: Session = Depends(get_db),
 ):
     if not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files (.xlsx, .xls) are accepted.")
 
-    recon_year = recon_month.split("-")[0] if "-" in recon_month else None
-
-    session_obj = ReconciliationSession(
-        status="processing",
-        books_filename=file.filename,
-        branch=branch.upper().strip(),
-        recon_month=recon_month,
-        recon_year=recon_year,
-    )
+    session_obj = ReconciliationSession(status="processing", books_filename=file.filename)
     db.add(session_obj)
     db.commit()
     db.refresh(session_obj)
 
     try:
         file_bytes = await file.read()
-        books_count = process_books_file(file_bytes, session_obj.id, db,
-                                         reconciliation_month=recon_month)
+        books_count, branch, recon_month = process_books_file(
+            file_bytes, session_obj.id, db, filename=file.filename,
+        )
     except ValueError as exc:
         session_obj.status = "error"
         db.commit()
@@ -56,6 +47,9 @@ async def upload_books(
         db.commit()
         raise HTTPException(500, f"Failed to process file: {exc}")
 
+    session_obj.branch = branch
+    session_obj.recon_month = recon_month
+    session_obj.recon_year = recon_month.split("-")[0] if "-" in recon_month else None
     session_obj.status = "books_uploaded"
     db.add(AuditLog(
         session_id=session_obj.id,

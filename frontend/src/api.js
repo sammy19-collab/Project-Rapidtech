@@ -4,11 +4,9 @@ const api = axios.create({ baseURL: '/api' })
 
 export const getBranches = () => api.get('/branches')
 
-export const uploadBooks = (file, branch, reconMonth) => {
+export const uploadBooks = (file) => {
   const fd = new FormData()
   fd.append('file', file)
-  fd.append('branch', branch)
-  fd.append('recon_month', reconMonth)
   return api.post('/upload/books', fd)
 }
 
