@@ -31,7 +31,7 @@ class BooksEntry(Base):
     id             = Column(Integer, primary_key=True, index=True)
     session_id     = Column(Integer, ForeignKey("reconciliation_sessions.id"), nullable=False, index=True)
     vendor_name    = Column(String(500), nullable=True)
-    gstin          = Column(String(20),  nullable=True, index=True)
+    gstin          = Column(String(50),  nullable=True, index=True)
     invoice_number = Column(String(100), nullable=True, index=True)
     invoice_date   = Column(Date,        nullable=True)
     invoice_month  = Column(String(7),   nullable=True)   # MM-YYYY from invoice date
@@ -58,7 +58,7 @@ class GSTR2BEntry(Base):
     id             = Column(Integer, primary_key=True, index=True)
     session_id     = Column(Integer, ForeignKey("reconciliation_sessions.id"), nullable=False, index=True)
     vendor_name    = Column(String(500), nullable=True)
-    gstin          = Column(String(20),  nullable=True, index=True)
+    gstin          = Column(String(50),  nullable=True, index=True)
     invoice_number = Column(String(100), nullable=True, index=True)
     invoice_date   = Column(Date,        nullable=True)
     invoice_month  = Column(String(7),   nullable=True)   # MM-YYYY from invoice date
@@ -89,7 +89,7 @@ class ReconciliationResult(Base):
     match_category  = Column(String(50), nullable=False)
     mismatch_reason = Column(Text, nullable=True)
     vendor_name     = Column(String(500), nullable=True)
-    gstin           = Column(String(20),  nullable=True)
+    gstin           = Column(String(50),  nullable=True)
     invoice_number  = Column(String(100), nullable=True)
     invoice_date    = Column(Date,        nullable=True)
     taxable_value   = Column(Numeric(15, 2), nullable=True, default=0)

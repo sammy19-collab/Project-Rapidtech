@@ -124,6 +124,11 @@ def process_gstr2b_file(
             continue
 
         gstin          = clean_gstin(raw_gstin)
+
+        # Skip template/instruction rows (e.g. "LEGALNAME", "TRADENAME(IFANY)")
+        # A real GSTIN is exactly 15 alphanumeric characters
+        if gstin and len(gstin) != 15:
+            continue
         invoice_number = clean_invoice_number(raw_inv_num)
         inv_month, inv_date_obj = standardize_date(raw_inv_date)
 
