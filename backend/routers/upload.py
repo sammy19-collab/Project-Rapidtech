@@ -58,7 +58,7 @@ async def upload_books(
     return {
         "session_id": session_obj.id,
         "books_count": books_count,
-        "branch": branch,
+        "branch": detected_branch,
         "filename": file.filename,
     }
 
