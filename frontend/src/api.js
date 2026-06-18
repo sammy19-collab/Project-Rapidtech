@@ -29,11 +29,10 @@ export const getMissingInGSTR2B = (sessionId, monthYear) => api.get(`/results/${
 
 export const getDashboard = (sessionId, monthYear) => api.get(`/dashboard/${sessionId}`, { params: monthYear ? { month_year: monthYear } : {} })
 
-export const getTallyPreview = (sessionId, { month, year } = {}) => api.get(`/tally/${sessionId}/preview`, { params: { ...(month ? { month } : {}), ...(year ? { year } : {}) } })
+export const getTallyPreview = (sessionId, month, year) => api.get(`/tally/${sessionId}/preview`, { params: { ...(month ? { month } : {}), ...(year ? { year } : {}) } })
 export const downloadTallyXml = (sessionId) => api.get(`/tally/${sessionId}/xml`, { responseType: 'blob' })
-export const downloadTallyXmlFiltered = (sessionId, { month, year } = {}) =>
-  api.get(`/tally/${sessionId}/xml`, { responseType: 'blob', params: { ...(month ? { month } : {}), ...(year ? { year } : {}) } })
 
 export const getSessions = (branch, reconMonth) => api.get('/sessions', { params: { ...(branch ? { branch } : {}), ...(reconMonth ? { recon_month: reconMonth } : {}) } })
 
 export const getGstr2bFiles = (sessionId) => api.get(`/sessions/${sessionId}/gstr2b-files`)
+export const downloadTallyXmlFiltered = (sessionId, month, year) => api.get(`/tally/${sessionId}/xml`, { responseType: 'blob', params: { ...(month ? { month } : {}), ...(year ? { year } : {}) } })

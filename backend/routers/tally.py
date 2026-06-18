@@ -3,10 +3,10 @@ Tally router: generate and download Tally XML import files.
 """
 
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
-from sqlalchemy import distinct
 
 from database import get_db
 from models import ReconciliationResult, ReconciliationSession
@@ -36,13 +36,14 @@ def _check_session(session_id: int, db: Session) -> ReconciliationSession:
 @router.get("/{session_id}/xml")
 async def download_tally_xml(
     session_id: int,
-    month: str = Query(None),
-    year: str = Query(None),
+    month: Optional[str] = Query(None, description="Filter by invoice month MM-YYYY"),
+    year: Optional[str] = Query(None, description="Filter by invoice year YYYY"),
     db: Session = Depends(get_db),
 ):
     """
     Generate and return a Tally-compatible XML file for all reconciled invoices
     (Exact Match + Strong Match) as a downloadable attachment.
+    Optionally filter by month (MM-YYYY) or year (YYYY).
     """
     _check_session(session_id, db)
 
@@ -55,7 +56,8 @@ async def download_tally_xml(
             detail=f"Failed to generate Tally XML: {exc}",
         )
 
-    filename = f"tally_import_session_{session_id}.xml"
+    suffix = f"_{month}" if month else (f"_{year}" if year else "")
+    filename = f"tally_import_session_{session_id}{suffix}.xml"
     return Response(
         content=xml_content,
         media_type="application/xml",
@@ -66,13 +68,14 @@ async def download_tally_xml(
 @router.get("/{session_id}/preview")
 async def preview_tally_xml(
     session_id: int,
-    month: str = Query(None),
-    year: str = Query(None),
+    month: Optional[str] = Query(None, description="Filter by invoice month MM-YYYY"),
+    year: Optional[str] = Query(None, description="Filter by invoice year YYYY"),
     db: Session = Depends(get_db),
 ):
     """
     Return a preview of the Tally XML limited to the first 5 vouchers.
     Response is returned as JSON containing the XML string.
+    Also returns available_months list.
     """
     _check_session(session_id, db)
 
@@ -85,40 +88,42 @@ async def preview_tally_xml(
             detail=f"Failed to generate Tally XML preview: {exc}",
         )
 
-    total_reconciled = (
+    base_query = (
         db.query(ReconciliationResult)
         .filter(
             ReconciliationResult.session_id == session_id,
             ReconciliationResult.match_category.in_(["Exact Match", "Strong Match"]),
         )
-        .count()
     )
 
-    # Build filtered count
-    filtered_q = db.query(ReconciliationResult).filter(
-        ReconciliationResult.session_id == session_id,
-        ReconciliationResult.match_category.in_(["Exact Match", "Strong Match"]),
-    )
+    total_reconciled = base_query.count()
+
+    # Filtered count
+    filtered_query = base_query
     if month:
-        filtered_q = filtered_q.filter(ReconciliationResult.invoice_month == month)
+        filtered_query = filtered_query.filter(ReconciliationResult.invoice_month == month)
     elif year:
-        filtered_q = filtered_q.filter(ReconciliationResult.invoice_month.like(f"%-{year}"))
-    filtered_count = filtered_q.count()
+        filtered_query = filtered_query.filter(ReconciliationResult.invoice_month.like(f"%-{year}"))
+    filtered_count = filtered_query.count()
 
-    # Available months and years
-    months = [r[0] for r in db.query(distinct(ReconciliationResult.invoice_month)).filter(
-        ReconciliationResult.session_id == session_id,
-        ReconciliationResult.match_category.in_(["Exact Match", "Strong Match"]),
-        ReconciliationResult.invoice_month.isnot(None)
-    ).order_by(ReconciliationResult.invoice_month).all()]
-    years = sorted({m.split("-")[1] for m in months if m and "-" in m})
+    # Available months
+    month_rows = (
+        db.query(ReconciliationResult.invoice_month)
+        .filter(
+            ReconciliationResult.session_id == session_id,
+            ReconciliationResult.match_category.in_(["Exact Match", "Strong Match"]),
+            ReconciliationResult.invoice_month.isnot(None),
+        )
+        .distinct()
+        .all()
+    )
+    available_months = sorted([r[0] for r in month_rows if r[0]])
 
     return {
         "session_id": session_id,
         "preview_vouchers": 5,
         "total_reconciled": total_reconciled,
         "filtered_count": filtered_count,
-        "available_months": months,
-        "available_years": years,
+        "available_months": available_months,
         "xml_preview": xml_content,
     }

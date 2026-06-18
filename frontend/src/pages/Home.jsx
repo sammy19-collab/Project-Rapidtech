@@ -30,10 +30,10 @@ export default function Home() {
   const [reconMonth, setReconMonth] = useState(getMonthOptions()[1].val)
   const [sessionId, setSessionId] = useState(null)
   const [booksStatus, setBooksStatus] = useState('idle')
-  const [gstrUploading, setGstrUploading] = useState(false)
   const [booksInfo, setBooksInfo] = useState(null)
-  const [gstrFiles, setGstrFiles] = useState([])
-  const [gstrTotal, setGstrTotal] = useState(0)
+  const [gstr2bFiles, setGstr2bFiles] = useState([])
+  const [totalGstr2bRecords, setTotalGstr2bRecords] = useState(0)
+  const [uploadingGstr, setUploadingGstr] = useState(false)
   const [reconciling, setReconciling] = useState(false)
   const [summary, setSummary] = useState(null)
 
@@ -42,6 +42,16 @@ export default function Home() {
   useEffect(() => {
     getBranches().then(r => setBranches(r.data.branches)).catch(() => setBranches(DEFAULT_BRANCHES))
   }, [])
+
+  const refreshGstr2bFiles = async (sid) => {
+    try {
+      const res = await getGstr2bFiles(sid || sessionId)
+      setGstr2bFiles(res.data.files)
+      setTotalGstr2bRecords(res.data.total_records)
+    } catch {
+      // ignore
+    }
+  }
 
   const handleConfirmBranch = () => {
     if (!branch) { toast.error('Please select a branch'); return }
@@ -64,17 +74,15 @@ export default function Home() {
   }
 
   const handleGstrUpload = async (file) => {
-    setGstrUploading(true)
+    setUploadingGstr(true)
     try {
-      await uploadGSTR2B(sessionId, file)
-      const filesRes = await getGstr2bFiles(sessionId)
-      setGstrFiles(filesRes.data.files)
-      setGstrTotal(filesRes.data.total_records)
-      toast.success(`GSTR-2B loaded: ${file.name}`)
+      const res = await uploadGSTR2B(sessionId, file)
+      toast.success(`GSTR-2B loaded: ${res.data.gstr2b_count} records`)
+      await refreshGstr2bFiles(sessionId)
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Failed to upload GSTR-2B file')
     } finally {
-      setGstrUploading(false)
+      setUploadingGstr(false)
     }
   }
 
@@ -88,7 +96,6 @@ export default function Home() {
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Reconciliation failed')
       setStep(2)
-      setReconciling(false)
     } finally {
       setReconciling(false)
     }
@@ -152,7 +159,7 @@ export default function Home() {
             <div className="flex items-center gap-3 text-sm">
               <span className="bg-blue-900 text-blue-300 px-3 py-1 rounded font-mono font-bold">{branch}</span>
               <span className="text-slate-400">{monthOptions.find(m => m.val === reconMonth)?.label}</span>
-              <button onClick={() => { setStep(0); setBooksStatus('idle'); setGstrUploading(false); setSessionId(null); setBooksInfo(null); setGstrFiles([]); setGstrTotal(0); setSummary(null) }}
+              <button onClick={() => { setStep(0); setBooksStatus('idle'); setSessionId(null); setBooksInfo(null); setGstr2bFiles([]); setTotalGstr2bRecords(0); setSummary(null) }}
                 className="ml-auto text-xs text-slate-500 hover:text-slate-300 underline">
                 Change
               </button>
@@ -179,41 +186,57 @@ export default function Home() {
         <div className={`bg-slate-800 border border-slate-700 rounded-lg p-6 transition-opacity ${step < 2 ? 'opacity-40 pointer-events-none' : ''}`}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-slate-200">Step 3: Upload GSTR-2B Excel</h2>
-            {gstrFiles.length > 0 && (
-              <span className="text-green-400 text-sm font-mono">
-                Total: {gstrTotal} records across {gstrFiles.length} file{gstrFiles.length !== 1 ? 's' : ''}
-              </span>
+            {totalGstr2bRecords > 0 && (
+              <span className="text-green-400 text-sm font-mono">{totalGstr2bRecords} total records</span>
             )}
           </div>
 
-          {/* Uploaded files list */}
-          {gstrFiles.length > 0 && (
-            <div className="mb-4 space-y-1.5">
-              {gstrFiles.map((f, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm bg-slate-700/40 rounded px-3 py-2">
-                  <span className="text-green-400">✓</span>
-                  <span className="text-slate-200 font-mono flex-1 truncate">{f.filename}</span>
+          {/* Already uploaded files list */}
+          {gstr2bFiles.length > 0 && (
+            <div className="mb-4 space-y-2">
+              <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Uploaded Files</p>
+              {gstr2bFiles.map((f) => (
+                <div key={f.id} className="flex items-center justify-between bg-slate-700/50 border border-slate-600 rounded px-3 py-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-4 h-4 text-green-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="text-slate-200 font-mono text-xs">{f.filename}</span>
+                  </div>
                   <span className="text-slate-400 text-xs font-mono">{f.record_count} records</span>
                 </div>
               ))}
-              <div className="text-xs text-slate-400 pt-1 pl-1">
-                Total GSTR-2B records: <span className="text-slate-200 font-mono">{gstrTotal}</span> across <span className="text-slate-200 font-mono">{gstrFiles.length}</span> file{gstrFiles.length !== 1 ? 's' : ''}
+              <div className="flex items-center justify-between pt-1 border-t border-slate-700 text-xs text-slate-400">
+                <span>{gstr2bFiles.length} file{gstr2bFiles.length !== 1 ? 's' : ''} uploaded</span>
+                <span className="font-mono font-semibold text-green-400">{totalGstr2bRecords} total records</span>
               </div>
             </div>
           )}
 
-          <UploadZone
-            onUpload={handleGstrUpload}
-            label={gstrUploading ? 'Uploading...' : `Drop ${branch || ''} GSTR-2B Excel here`}
-            description="Upload GSTR-2B Excel downloaded from GST portal (.xlsx / .xls)"
-            status={gstrUploading ? 'loading' : 'idle'}
-            disabled={step < 2 || gstrUploading}
-          />
+          {/* Upload zone — always shown when step 2 is active */}
+          <div className="relative">
+            {uploadingGstr && (
+              <div className="absolute inset-0 bg-slate-800/80 flex items-center justify-center rounded z-10">
+                <div className="flex flex-col items-center gap-2">
+                  <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-slate-300 text-xs">Uploading...</span>
+                </div>
+              </div>
+            )}
+            <UploadZone
+              onUpload={handleGstrUpload}
+              label={gstr2bFiles.length > 0 ? `Upload Another GSTR-2B File` : `Drop ${branch} GSTR-2B Excel here`}
+              description="Upload GSTR-2B Excel downloaded from GST portal (.xlsx / .xls)"
+              status={uploadingGstr ? 'loading' : 'idle'}
+              disabled={step !== 2 || uploadingGstr}
+            />
+          </div>
 
-          {gstrFiles.length > 0 && (
+          {/* Run Reconciliation button — shown as soon as at least 1 file uploaded */}
+          {gstr2bFiles.length > 0 && (
             <button
               onClick={handleReconcile}
-              disabled={reconciling}
+              disabled={reconciling || uploadingGstr}
               className="mt-4 w-full bg-green-700 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded transition-colors"
             >
               Run Reconciliation for {branch} — {monthOptions.find(m => m.val === reconMonth)?.label}
@@ -229,7 +252,7 @@ export default function Home() {
               <div className="flex flex-col items-center gap-3 py-6">
                 <div className="w-10 h-10 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
                 <span className="text-slate-400 text-sm">
-                  Comparing {booksInfo?.books_count} books entries against {gstrTotal} GSTR-2B entries...
+                  Comparing {booksInfo?.books_count} books entries against {totalGstr2bRecords} GSTR-2B entries...
                 </span>
               </div>
             ) : summary ? (

@@ -1,8 +1,9 @@
 import logging
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from database import get_db
-from models import AuditLog, ReconciliationSession, GSTR2BUpload
+from models import AuditLog, ReconciliationSession, GSTR2BUpload, BooksEntry, GSTR2BEntry, ReconciliationResult
 from services.books_processor import process_books_file
 from services.gstr2b_processor import process_gstr2b_file
 
@@ -97,7 +98,15 @@ async def upload_gstr2b(
         logger.exception("Error processing GSTR-2B for session %d", session_id)
         raise HTTPException(500, f"Failed to process file: {exc}")
 
-    db.add(GSTR2BUpload(session_id=session_id, filename=file.filename, record_count=gstr2b_count))
+    # Create GSTR2BUpload record
+    upload_record = GSTR2BUpload(
+        session_id=session_id,
+        filename=file.filename,
+        record_count=gstr2b_count,
+    )
+    db.add(upload_record)
+
+    session_obj.gstr2b_filename = file.filename
     session_obj.status = "ready_to_reconcile"
     db.add(AuditLog(
         session_id=session_id,
@@ -114,12 +123,24 @@ async def upload_gstr2b(
 
 
 @router.get("/sessions/{session_id}/gstr2b-files")
-def get_gstr2b_files(session_id: int, db: Session = Depends(get_db)):
-    files = db.query(GSTR2BUpload).filter(GSTR2BUpload.session_id == session_id).order_by(GSTR2BUpload.uploaded_at).all()
-    total = sum(f.record_count for f in files)
+def list_gstr2b_files(session_id: int, db: Session = Depends(get_db)):
+    session_obj = db.query(ReconciliationSession).filter(ReconciliationSession.id == session_id).first()
+    if not session_obj:
+        raise HTTPException(404, f"Session {session_id} not found.")
+    uploads = db.query(GSTR2BUpload).filter(GSTR2BUpload.session_id == session_id).order_by(GSTR2BUpload.uploaded_at).all()
+    total = sum(u.record_count for u in uploads)
     return {
-        "files": [{"filename": f.filename, "record_count": f.record_count, "uploaded_at": f.uploaded_at.isoformat()} for f in files],
-        "total_records": total
+        "session_id": session_id,
+        "files": [
+            {
+                "id": u.id,
+                "filename": u.filename,
+                "record_count": u.record_count,
+                "uploaded_at": u.uploaded_at.isoformat() if u.uploaded_at else None,
+            }
+            for u in uploads
+        ],
+        "total_records": total,
     }
 
 
@@ -151,8 +172,32 @@ def delete_session(session_id: int, db: Session = Depends(get_db)):
     return {"deleted": session_id}
 
 
-def _session_dict(s: ReconciliationSession, db=None) -> dict:
-    d = {
+def _session_dict(s: ReconciliationSession, db: Session) -> dict:
+    books_count = db.query(func.count(BooksEntry.id)).filter(BooksEntry.session_id == s.id).scalar() or 0
+    gstr2b_count = db.query(func.count(GSTR2BEntry.id)).filter(GSTR2BEntry.session_id == s.id).scalar() or 0
+
+    result_counts = {
+        "exact": 0, "strong": 0, "probable": 0, "manual": 0, "missing_books": 0
+    }
+    rows = (
+        db.query(ReconciliationResult.match_category, func.count(ReconciliationResult.id))
+        .filter(ReconciliationResult.session_id == s.id)
+        .group_by(ReconciliationResult.match_category)
+        .all()
+    )
+    cat_map = {
+        "Exact Match": "exact",
+        "Strong Match": "strong",
+        "Probable Match": "probable",
+        "Manual Review": "manual",
+        "Missing in Books": "missing_books",
+    }
+    for category, cnt in rows:
+        key = cat_map.get(category)
+        if key:
+            result_counts[key] = cnt
+
+    return {
         "id": s.id,
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "status": s.status,
@@ -161,13 +206,7 @@ def _session_dict(s: ReconciliationSession, db=None) -> dict:
         "branch": s.branch,
         "recon_month": s.recon_month,
         "recon_year": s.recon_year,
+        "books_count": books_count,
+        "gstr2b_count": gstr2b_count,
+        "result_counts": result_counts,
     }
-    if db:
-        from models import BooksEntry, GSTR2BEntry, GSTR2BUpload, ReconciliationResult
-        from sqlalchemy import func
-        d["books_count"] = db.query(func.count(BooksEntry.id)).filter(BooksEntry.session_id == s.id).scalar() or 0
-        d["gstr2b_count"] = db.query(func.count(GSTR2BEntry.id)).filter(GSTR2BEntry.session_id == s.id).scalar() or 0
-        d["gstr2b_file_count"] = db.query(func.count(GSTR2BUpload.id)).filter(GSTR2BUpload.session_id == s.id).scalar() or 0
-        cats = db.query(ReconciliationResult.match_category, func.count(ReconciliationResult.id)).filter(ReconciliationResult.session_id == s.id).group_by(ReconciliationResult.match_category).all()
-        d["result_counts"] = {c: n for c, n in cats}
-    return d

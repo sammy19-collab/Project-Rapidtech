@@ -6,6 +6,7 @@ import logging
 import uuid
 from datetime import date
 from decimal import Decimal
+from typing import Optional
 from xml.etree.ElementTree import Element, SubElement, tostring
 from xml.dom import minidom
 
@@ -85,9 +86,16 @@ def _build_voucher(parent: Element, result: ReconciliationResult, books: BooksEn
     SubElement(bill_alloc, "AMOUNT").text = str(total.quantize(Decimal("0.01")))
 
 
-def generate_tally_xml(session_id: int, db: Session, limit: int = None, month: str = None, year: str = None) -> str:
+def generate_tally_xml(
+    session_id: int,
+    db: Session,
+    limit: int = None,
+    month: Optional[str] = None,
+    year: Optional[str] = None,
+) -> str:
     """
     Fetch reconciled results for the session and produce a Tally XML import string.
+    Optionally filter by invoice_month (MM-YYYY) or year (YYYY suffix match).
     """
     query = (
         db.query(ReconciliationResult)
@@ -101,6 +109,7 @@ def generate_tally_xml(session_id: int, db: Session, limit: int = None, month: s
         query = query.filter(ReconciliationResult.invoice_month == month)
     elif year:
         query = query.filter(ReconciliationResult.invoice_month.like(f"%-{year}"))
+
     if limit:
         query = query.limit(limit)
     results = query.all()

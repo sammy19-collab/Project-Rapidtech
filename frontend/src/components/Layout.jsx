@@ -1,6 +1,5 @@
 import { Link, useParams } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { getSessions } from '../api'
 
 export default function Layout({ children }) {
   const params = useParams()
@@ -10,9 +9,7 @@ export default function Layout({ children }) {
 
   useEffect(() => {
     if (!sessionId) return
-    import('../api').then(({ getSessions }) => {
-      fetch(`/api/sessions/${sessionId}`).then(r => r.json()).then(setSessionInfo).catch(() => {})
-    })
+    fetch(`/api/sessions/${sessionId}`).then(r => r.json()).then(setSessionInfo).catch(() => {})
   }, [sessionId])
 
   return (
@@ -39,7 +36,7 @@ export default function Layout({ children }) {
                 <Link to={`/tally/${sessionId}`} className="text-slate-300 hover:text-blue-400 transition-colors">Tally Export</Link>
               </nav>
             )}
-            <Link to="/history" className="text-slate-300 hover:text-blue-400 transition-colors text-sm">History</Link>
+            <Link to="/history" className="text-slate-300 hover:text-blue-400 text-sm transition-colors">History</Link>
             <Link to="/" className="text-slate-500 hover:text-slate-300 text-xs">+ New</Link>
             <span className="text-slate-500 text-xs font-mono">{today}</span>
           </div>
