@@ -384,9 +384,7 @@ def build_workbook():
     _sheet_gstr2b_data(wb)
     _sheet_reconciliation(wb)
 
-    out = "GST_Reconciliation_v5.xlsm"
-    # Save as .xlsm (macro-enabled) — openpyxl won't embed VBA binaries,
-    # but the correct extension tells Excel to expect macro content.
+    out = "GST_Reconciliation_v5.xlsx"
     wb.save(out)
     print(f"✓  Saved {out}")
     print()
